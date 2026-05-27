@@ -9,7 +9,7 @@ use orderbook::OrderBook;
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
-use crate::domain::order::{Order, Side};
+use crate::domain::order::{Order, Side, TimeInForce};
 
 pub struct Engine {
     orderbook: OrderBook,
@@ -28,13 +28,19 @@ impl Engine {
     pub fn run(&mut self) {
         while let Ok(command) = self.engine_rx.recv() {
             match command {
-                EngineCommand::Place(order) => self.place_order(order),
+                EngineCommand::Place(order) => match order.tif {
+                    TimeInForce::GTC => self.place_order(order, true),
+                    TimeInForce::IOC => self.place_order(order, false),
+                    TimeInForce::FOK => {
+                        // TODO FOK 추가
+                    }
+                },
             }
         }
     }
 
     /// 주문 접수
-    fn place_order(&mut self, mut incoming: Order) {
+    fn place_order(&mut self, mut incoming: Order, resting: bool) {
         while let Some((price, restings)) = self.orderbook.get_best_opposite(&incoming.side) {
             if !can_match(&incoming, price) {
                 break;
@@ -47,7 +53,7 @@ impl Engine {
             }
         }
 
-        if !incoming.is_filled() {
+        if !incoming.is_filled() && resting {
             self.orderbook.add_order(incoming);
         }
     }
