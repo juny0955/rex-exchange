@@ -46,16 +46,16 @@ impl OrderBook {
                     .entry(Reverse(order.price))
                     .or_default()
                     .push_back(order.order_id);
-                self.index.insert(order.order_id, order);
             }
             Side::Sell => {
                 self.asks
                     .entry(order.price)
                     .or_default()
                     .push_back(order.order_id);
-                self.index.insert(order.order_id, order);
             }
         }
+
+        self.index.insert(order.order_id, order);
     }
 
     /// 주문 삭제

@@ -16,10 +16,21 @@ pub enum OrderType {
 #[derive(Debug, Clone)]
 pub struct Order {
     pub order_id: Uuid,
+    pub symbol: String,
     pub side: Side,
     pub order_type: OrderType,
     pub price: Decimal,
     pub quantity: Decimal,
     pub remaining_quantity: Decimal,
     pub created_at: u64,
+}
+
+impl Order {
+    pub fn fill(&mut self, fill_qty: Decimal) {
+        self.remaining_quantity -= fill_qty
+    }
+
+    pub fn is_filled(&self) -> bool {
+        self.remaining_quantity == Decimal::ZERO
+    }
 }
