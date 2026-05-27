@@ -1,3 +1,5 @@
+use matching_engine::init::init;
+
 fn main() {
-    println!("Hello, world!");
+    init();
 }
