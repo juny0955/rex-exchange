@@ -29,18 +29,24 @@ impl Engine {
         while let Ok(command) = self.engine_rx.recv() {
             match command {
                 EngineCommand::Place(order) => match order.tif {
-                    TimeInForce::GTC => self.place_order(order, true),
-                    TimeInForce::IOC => self.place_order(order, false),
-                    TimeInForce::FOK => {
-                        // TODO FOK 추가
-                    }
+                    TimeInForce::GTC => self.place_order(order, true, false),
+                    TimeInForce::IOC => self.place_order(order, false, false),
+                    TimeInForce::FOK => self.place_order(order, false, true),
                 },
             }
         }
     }
 
     /// 주문 접수
-    fn place_order(&mut self, mut incoming: Order, resting: bool) {
+    fn place_order(&mut self, mut incoming: Order, resting: bool, is_fok: bool) {
+        if is_fok
+            && !self
+                .orderbook
+                .can_fully_fill(incoming.side, incoming.quantity, incoming.price)
+        {
+            return;
+        }
+
         while let Some((price, restings)) = self.orderbook.get_best_opposite(&incoming.side) {
             if !can_match(&incoming, price) {
                 break;
