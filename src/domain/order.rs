@@ -13,12 +13,20 @@ pub enum OrderType {
     Market,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeInForce {
+    GTC,
+    IOC,
+    FOK,
+}
+
 #[derive(Debug, Clone)]
 pub struct Order {
     pub order_id: Uuid,
     pub symbol: String,
     pub side: Side,
     pub order_type: OrderType,
+    pub tif: TimeInForce,
     pub price: Decimal,
     pub quantity: Decimal,
     pub remaining_quantity: Decimal,
@@ -31,6 +39,6 @@ impl Order {
     }
 
     pub fn is_filled(&self) -> bool {
-        self.remaining_quantity == Decimal::ZERO
+        self.remaining_quantity.is_zero()
     }
 }
