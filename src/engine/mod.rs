@@ -137,3 +137,119 @@ fn can_match(incoming: &Order, resting_price: Decimal) -> bool {
         OrderSize::Quote(_) => true,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use crossbeam::channel;
+    use rust_decimal::Decimal;
+    use uuid::Uuid;
+
+    use crate::domain::order::{Order, OrderSize, OrderStatus, OrderType, Side, TimeInForce};
+
+    fn make_engine() -> Engine {
+        let (_, rx) = channel::unbounded();
+        Engine::new(rx)
+    }
+
+    fn limit_order(side: Side, price: i64, qty: i64) -> Order {
+        Order {
+            order_id: Uuid::now_v7(),
+            symbol: "BTC/USDT".to_string(),
+            side,
+            order_type: OrderType::Limit,
+            tif: TimeInForce::GTC,
+            price: Some(Decimal::new(price, 0)),
+            size: OrderSize::Base(Decimal::new(qty, 0)),
+            executed_base_qty: Decimal::ZERO,
+            executed_quote_qty: Decimal::ZERO,
+            status: OrderStatus::New,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    fn market_quote_order(side: Side, quote: i64) -> Order {
+        Order {
+            order_id: Uuid::now_v7(),
+            symbol: "BTC/USDT".to_string(),
+            side,
+            order_type: OrderType::Market,
+            tif: TimeInForce::IOC,
+            price: None,
+            size: OrderSize::Quote(Decimal::new(quote, 0)),
+            executed_base_qty: Decimal::ZERO,
+            executed_quote_qty: Decimal::ZERO,
+            status: OrderStatus::New,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn 매수_매도_완전_체결_테스트() {
+        let mut engine = make_engine();
+        engine.orderbook.add_order(limit_order(Side::Sell, 100, 10));
+
+        engine.place_order(limit_order(Side::Buy, 100, 10), false, false);
+
+        assert!(engine.orderbook.get_best_opposite(&Side::Buy).is_none());
+    }
+
+    #[test]
+    fn fok_잔량_부족시_취소_테스트() {
+        let mut engine = make_engine();
+        engine.orderbook.add_order(limit_order(Side::Sell, 100, 5));
+
+        // FOK Buy 10, 잔량 5만 존재 → 취소
+        engine.place_order(limit_order(Side::Buy, 100, 10), false, true);
+
+        // SELL 여전히 원래 수량 그대로
+        assert!(engine.orderbook.can_fully_fill_base(
+            Side::Buy,
+            Decimal::new(5, 0),
+            Decimal::new(100, 0)
+        ));
+        assert!(!engine.orderbook.can_fully_fill_base(
+            Side::Buy,
+            Decimal::new(6, 0),
+            Decimal::new(100, 0)
+        ));
+    }
+
+    #[test]
+    fn 시장가_quote_매수_체결_테스트() {
+        let mut engine = make_engine();
+        // SELL 10 BTC @ 100 = 총 1000 USDT
+        engine.orderbook.add_order(limit_order(Side::Sell, 100, 10));
+
+        // MARKET BUY 400 USDT → 4 BTC 체결
+        engine.place_order(market_quote_order(Side::Buy, 400), false, false);
+
+        // 잔여 6 BTC @ 100 = 600 USDT
+        assert!(
+            engine
+                .orderbook
+                .can_fully_fill_quote(Side::Buy, Decimal::new(500, 0))
+        );
+        assert!(
+            !engine
+                .orderbook
+                .can_fully_fill_quote(Side::Buy, Decimal::new(700, 0))
+        );
+    }
+
+    #[test]
+    fn gtc_잔존_후_체결_테스트() {
+        let mut engine = make_engine();
+
+        // 매도 없음 → BUY GTC 잔존
+        engine.place_order(limit_order(Side::Buy, 100, 5), true, false);
+        assert!(engine.orderbook.get_best_opposite(&Side::Sell).is_some());
+
+        // SELL 진입 → 잔존 BUY와 체결
+        engine.place_order(limit_order(Side::Sell, 100, 5), false, false);
+        assert!(engine.orderbook.get_best_opposite(&Side::Sell).is_none());
+    }
+}
