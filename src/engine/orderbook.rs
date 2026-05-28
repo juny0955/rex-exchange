@@ -137,7 +137,7 @@ impl OrderBook {
         }
     }
 
-    /// 체결 가능 여부 확인 (quote)
+    /// 전량 체결 가능 여부 확인 (quote)
     pub fn can_fully_fill_quote(&self, side: Side, mut quote: Decimal) -> bool {
         match side {
             Side::Buy => {
@@ -166,5 +166,105 @@ impl OrderBook {
     /// 주문 조회(mutable)
     pub fn get_order_mut(&mut self, order_id: &Uuid) -> Option<&mut Order> {
         self.index.get_mut(order_id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use rust_decimal::Decimal;
+    use uuid::Uuid;
+
+    use crate::domain::order::{Order, OrderSize, OrderStatus, OrderType, Side, TimeInForce};
+
+    fn make_ask(price: Decimal, qty: Decimal) -> Order {
+        Order {
+            order_id: Uuid::now_v7(),
+            symbol: "BTC/USDT".to_string(),
+            side: Side::Sell,
+            order_type: OrderType::Limit,
+            tif: TimeInForce::GTC,
+            price: Some(price),
+            size: OrderSize::Base(qty),
+            executed_base_qty: Decimal::ZERO,
+            executed_quote_qty: Decimal::ZERO,
+            status: OrderStatus::New,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    fn make_bid(price: Decimal, qty: Decimal) -> Order {
+        Order {
+            order_id: Uuid::now_v7(),
+            symbol: "BTC/USDT".to_string(),
+            side: Side::Buy,
+            order_type: OrderType::Limit,
+            tif: TimeInForce::GTC,
+            price: Some(price),
+            size: OrderSize::Base(qty),
+            executed_base_qty: Decimal::ZERO,
+            executed_quote_qty: Decimal::ZERO,
+            status: OrderStatus::New,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn 최상위_반대편_호가_조회_테스트() {
+        let mut ob = OrderBook::default();
+        ob.add_order(make_ask(Decimal::new(200, 0), Decimal::new(5, 0)));
+        ob.add_order(make_ask(Decimal::new(100, 0), Decimal::new(5, 0)));
+
+        let (ask_price, _) = ob.get_best_opposite(&Side::Buy).unwrap();
+        assert_eq!(ask_price, Decimal::new(100, 0)); // 최저 매도호가
+
+        ob.add_order(make_bid(Decimal::new(80, 0), Decimal::new(5, 0)));
+        ob.add_order(make_bid(Decimal::new(90, 0), Decimal::new(5, 0)));
+
+        let (bid_price, _) = ob.get_best_opposite(&Side::Sell).unwrap();
+        assert_eq!(bid_price, Decimal::new(90, 0)); // 최고 매수호가
+    }
+
+    #[test]
+    fn base_전량_체결_가능_확인_테스트() {
+        let mut ob = OrderBook::default();
+        // 100에 qty 5, 120에 qty 10
+        ob.add_order(make_ask(Decimal::new(100, 0), Decimal::new(5, 0)));
+        ob.add_order(make_ask(Decimal::new(120, 0), Decimal::new(10, 0)));
+
+        // 지정가 110 → ask@100만 유효(qty 5)
+        assert!(!ob.can_fully_fill_base(Side::Buy, Decimal::new(8, 0), Decimal::new(110, 0)));
+        assert!(ob.can_fully_fill_base(Side::Buy, Decimal::new(3, 0), Decimal::new(110, 0)));
+
+        // 지정가 130 → 두 레벨 합산(qty 15)
+        assert!(ob.can_fully_fill_base(Side::Buy, Decimal::new(12, 0), Decimal::new(130, 0)));
+    }
+
+    #[test]
+    fn quote_전량_체결_가능_확인_테스트() {
+        let mut ob = OrderBook::default();
+        // ask@100 qty 3 (300), ask@200 qty 2 (400) → 총 700
+        ob.add_order(make_ask(Decimal::new(100, 0), Decimal::new(3, 0)));
+        ob.add_order(make_ask(Decimal::new(200, 0), Decimal::new(2, 0)));
+
+        assert!(!ob.can_fully_fill_quote(Side::Buy, Decimal::new(800, 0)));
+        assert!(ob.can_fully_fill_quote(Side::Buy, Decimal::new(500, 0)));
+    }
+
+    #[test]
+    fn 삭제시_빈_호가_정리_테스트() {
+        let mut ob = OrderBook::default();
+        let order = make_ask(Decimal::new(100, 0), Decimal::new(5, 0));
+        let order_id = order.order_id;
+        ob.add_order(order);
+
+        assert!(ob.get_best_opposite(&Side::Buy).is_some());
+
+        ob.remove_order(order_id);
+
+        assert!(ob.get_best_opposite(&Side::Buy).is_none());
     }
 }
