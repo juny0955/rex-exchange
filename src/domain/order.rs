@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
@@ -41,7 +42,8 @@ pub struct Order {
     pub quantity: Decimal,
     pub remaining_quantity: Decimal,
     pub status: OrderStatus,
-    pub created_at: u64,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 impl Order {
@@ -57,6 +59,7 @@ impl Order {
         } else {
             OrderStatus::PartiallyFilled
         };
+        self.updated_at = Utc::now();
     }
 
     pub fn is_filled(&self) -> bool {
