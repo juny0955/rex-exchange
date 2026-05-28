@@ -61,8 +61,8 @@ impl Order {
 
         match self.size {
             OrderSize::Base(qty) => assert!(self.executed_base_qty + base_qty <= qty),
-            OrderSize::Quote(quote_qty) => {
-                assert!(self.executed_quote_qty + quote_qty <= quote_qty)
+            OrderSize::Quote(order_quote_qty) => {
+                assert!(self.executed_quote_qty + quote_qty <= order_quote_qty)
             }
         }
 
