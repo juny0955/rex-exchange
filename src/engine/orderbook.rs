@@ -1,6 +1,7 @@
 use std::{
     cmp::Reverse,
     collections::{BTreeMap, HashMap, VecDeque},
+    ops::Mul,
 };
 
 use rust_decimal::Decimal;
@@ -43,13 +44,13 @@ impl OrderBook {
         match order.side {
             Side::Buy => {
                 self.bids
-                    .entry(Reverse(order.price))
+                    .entry(Reverse(order.price.unwrap()))
                     .or_default()
                     .push_back(order.order_id);
             }
             Side::Sell => {
                 self.asks
-                    .entry(order.price)
+                    .entry(order.price.unwrap())
                     .or_default()
                     .push_back(order.order_id);
             }
@@ -62,10 +63,11 @@ impl OrderBook {
     /// TODO: 현재 O(n) 개선 필요
     pub fn remove_order(&mut self, order_id: Uuid) {
         let order = self.index.remove(&order_id).unwrap();
+        let price = order.price.unwrap();
 
         match order.side {
             Side::Buy => {
-                let price_key = Reverse(order.price);
+                let price_key = Reverse(price);
 
                 if let Some(queue) = self.bids.get_mut(&price_key) {
                     queue.retain(|id| *id != order_id);
@@ -76,20 +78,19 @@ impl OrderBook {
                 }
             }
             Side::Sell => {
-                if let Some(queue) = self.asks.get_mut(&order.price) {
+                if let Some(queue) = self.asks.get_mut(&price) {
                     queue.retain(|id| *id != order_id);
 
                     if queue.is_empty() {
-                        self.asks.remove(&order.price);
+                        self.asks.remove(&price);
                     }
                 }
             }
         }
     }
 
-    /// 전량 체결 가능 여부 확인
-    pub fn can_fully_fill(&self, side: Side, qty: Decimal, price: Decimal) -> bool {
-        let mut remaining = qty;
+    /// 전량 체결 가능 여부 확인 (base)
+    pub fn can_fully_fill_base(&self, side: Side, mut qty: Decimal, price: Decimal) -> bool {
         match side {
             Side::Buy => {
                 for (ask_price, queue) in &self.asks {
@@ -102,9 +103,9 @@ impl OrderBook {
                             continue;
                         };
 
-                        remaining -= order.remaining_quantity;
+                        qty -= order.remaining_base_qty().unwrap();
 
-                        if remaining <= Decimal::ZERO {
+                        if qty <= Decimal::ZERO {
                             return true;
                         }
                     }
@@ -123,15 +124,41 @@ impl OrderBook {
                             continue;
                         };
 
-                        remaining -= order.remaining_quantity;
+                        qty -= order.remaining_base_qty().unwrap();
 
-                        if remaining <= Decimal::ZERO {
+                        if qty <= Decimal::ZERO {
                             return true;
                         }
                     }
                 }
 
                 false
+            }
+        }
+    }
+
+    /// 체결 가능 여부 확인 (quote)
+    pub fn can_fully_fill_quote(&self, side: Side, mut quote: Decimal) -> bool {
+        match side {
+            Side::Buy => {
+                for (ask_price, queue) in &self.asks {
+                    for order_id in queue {
+                        let Some(order) = self.index.get(order_id) else {
+                            continue;
+                        };
+
+                        quote -= order.remaining_base_qty().unwrap().mul(*ask_price);
+
+                        if quote <= Decimal::ZERO {
+                            return true;
+                        }
+                    }
+                }
+
+                false
+            }
+            Side::Sell => {
+                unreachable!("Quote + Sell 주문 지원하지않음");
             }
         }
     }
