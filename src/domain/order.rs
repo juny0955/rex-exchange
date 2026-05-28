@@ -107,3 +107,86 @@ impl Order {
         !matches!(self.status, OrderStatus::PartiallyFilled | OrderStatus::New)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    fn make_base_order(qty: Decimal) -> Order {
+        Order {
+            order_id: Uuid::now_v7(),
+            symbol: "BTC/USDT".to_string(),
+            side: Side::Buy,
+            order_type: OrderType::Limit,
+            tif: TimeInForce::GTC,
+            price: Some(Decimal::new(100, 0)),
+            size: OrderSize::Base(qty),
+            executed_base_qty: Decimal::ZERO,
+            executed_quote_qty: Decimal::ZERO,
+            status: OrderStatus::New,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    fn make_quote_order(quote: Decimal) -> Order {
+        Order {
+            order_id: Uuid::now_v7(),
+            symbol: "BTC/USDT".to_string(),
+            side: Side::Buy,
+            order_type: OrderType::Market,
+            tif: TimeInForce::IOC,
+            price: None,
+            size: OrderSize::Quote(quote),
+            executed_base_qty: Decimal::ZERO,
+            executed_quote_qty: Decimal::ZERO,
+            status: OrderStatus::New,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn base_주문_분할_체결_테스트() {
+        let mut order = make_base_order(Decimal::new(10, 0));
+
+        order.fill(Decimal::new(4, 0), Decimal::new(400, 0));
+        assert_eq!(order.executed_base_qty, Decimal::new(4, 0));
+        assert_eq!(order.executed_quote_qty, Decimal::new(400, 0));
+        assert_eq!(order.status, OrderStatus::PartiallyFilled);
+
+        order.fill(Decimal::new(6, 0), Decimal::new(600, 0));
+        assert_eq!(order.executed_base_qty, Decimal::new(10, 0));
+        assert_eq!(order.executed_quote_qty, Decimal::new(1000, 0));
+        assert_eq!(order.status, OrderStatus::Filled);
+    }
+
+    #[test]
+    fn quote_주문_분할_체결_테스트() {
+        let mut order = make_quote_order(Decimal::new(1000, 0));
+
+        order.fill(Decimal::new(4, 0), Decimal::new(400, 0));
+        assert_eq!(order.executed_quote_qty, Decimal::new(400, 0));
+        assert_eq!(order.status, OrderStatus::PartiallyFilled);
+
+        order.fill(Decimal::new(6, 0), Decimal::new(600, 0));
+        assert_eq!(order.executed_quote_qty, Decimal::new(1000, 0));
+        assert_eq!(order.status, OrderStatus::Filled);
+    }
+
+    #[test]
+    #[should_panic]
+    fn base_주문_초과_체결_테스트() {
+        let mut order = make_base_order(Decimal::new(10, 0));
+        order.fill(Decimal::new(11, 0), Decimal::new(1100, 0));
+    }
+
+    #[test]
+    #[should_panic]
+    fn quote_주문_초과_체결_테스트() {
+        let mut order = make_quote_order(Decimal::new(1000, 0));
+        order.fill(Decimal::new(11, 0), Decimal::new(1100, 0));
+    }
+}
