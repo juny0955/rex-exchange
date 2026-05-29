@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 
 use crossbeam::channel::Receiver;
 use rust_decimal::Decimal;
+use tracing::{debug, error, info};
 use uuid::Uuid;
 
 use crate::{
@@ -26,6 +27,7 @@ impl MatchingEngine {
 
     /// 엔진 실행
     pub fn run(&mut self) {
+        info!(symbol = %self.symbol, "엔진 시작");
         while let Ok(command) = self.engine_rx.recv() {
             match command {
                 EngineCommand::Place(order) => self.place_order(order),
@@ -35,16 +37,51 @@ impl MatchingEngine {
 
     /// 주문 접수
     fn place_order(&mut self, mut taker: Order) {
+        debug!(
+            symbol = %self.symbol,
+            order_id = %taker.order_id,
+            side = ?taker.side,
+            order_type = ?taker.order_type,
+            tif = ?taker.tif,
+            price = ?taker.price,
+            size = ?taker.size,
+            "주문 접수"
+        );
+
         if matches!(taker.tif, TimeInForce::GTC) && taker.order_type != OrderType::Limit {
+            error!(
+                symbol = %self.symbol,
+                order_id = %taker.order_id,
+                order_type = ?taker.order_type,
+                tif = ?taker.tif,
+                "주문 거부: GTC 주문 LIMIT만 허용"
+            );
             return;
         }
 
         if matches!(taker.tif, TimeInForce::FOK) && !self.validation_fok_order(&taker) {
+            debug!(
+                symbol = %self.symbol,
+                order_id = %taker.order_id,
+                side = ?taker.side,
+                order_type = ?taker.order_type,
+                price = ?taker.price,
+                size = ?taker.size,
+                "주문 취소: FOK 전량 체결 불가"
+            );
             return;
         }
 
         while let Some((price, makers)) = self.orderbook.get_best_opposite(&taker.side) {
             if !can_match(&taker, price) {
+                debug!(
+                    symbol = %self.symbol,
+                    order_id = %taker.order_id,
+                    side = ?taker.side,
+                    taker_price = ?taker.price,
+                    best_maker_price = %price,
+                    "매칭 중단: 가격 조건 불일치"
+                );
                 break;
             }
 
@@ -56,6 +93,14 @@ impl MatchingEngine {
         }
 
         if !taker.is_filled() && matches!(taker.tif, TimeInForce::GTC) {
+            debug!(
+                symbol = %self.symbol,
+                order_id = %taker.order_id,
+                remaining_base_qty = ?taker.remaining_base_qty(),
+                remaining_quote_qty = ?taker.remaining_quote_qty(),
+                "오더북 등록"
+            );
+
             self.orderbook.add_order(taker);
         }
     }
@@ -80,11 +125,27 @@ impl MatchingEngine {
                 let fill_quote = fill_base * maker_price;
                 maker.fill(fill_base, fill_quote);
                 taker.fill(fill_base, fill_quote);
+                info!(
+                    symbol = %self.symbol,
+                    taker_order_id = %taker.order_id,
+                    maker_order_id = %maker.order_id,
+                    price = %maker_price,
+                    fill_base = %fill_base,
+                    fill_quote = %fill_quote,
+                    taker_filled = taker.is_filled(),
+                    maker_filled = maker.is_filled(),
+                    "주문 체결"
+                );
 
                 maker.is_filled()
             };
 
             if maker_filled {
+                debug!(
+                    symbol = %self.symbol,
+                    maker_order_id = %maker_id,
+                    "메이커 주문 완전 체결 후 오더북 제거"
+                );
                 self.orderbook.remove_order(maker_id);
             }
 
