@@ -1,26 +1,32 @@
 use std::collections::VecDeque;
 
-use crossbeam::channel::Receiver;
+use crossbeam::channel::{Receiver, Sender};
 use rust_decimal::Decimal;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::{
     domain::order::{Order, OrderSize, OrderType, Side, TimeInForce},
-    engine::{command::EngineCommand, orderbook::OrderBook},
+    engine::{command::EngineCommand, orderbook::OrderBook, result::EngineResult},
 };
 
 pub struct MatchingEngine {
     symbol: String,
     engine_rx: Receiver<EngineCommand>,
+    result_tx: Sender<EngineResult>,
     orderbook: OrderBook,
 }
 
 impl MatchingEngine {
-    pub fn new(symbol: String, engine_rx: Receiver<EngineCommand>) -> Self {
+    pub fn new(
+        symbol: String,
+        engine_rx: Receiver<EngineCommand>,
+        result_tx: Sender<EngineResult>,
+    ) -> Self {
         Self {
             symbol,
             engine_rx,
+            result_tx,
             orderbook: OrderBook::default(),
         }
     }
@@ -286,9 +292,10 @@ mod tests {
     use crate::domain::order::{Order, OrderSize, OrderStatus, OrderType, Side, TimeInForce};
 
     fn make_engine() -> MatchingEngine {
-        let (_, rx) = channel::unbounded();
+        let (_, engine_rx) = channel::unbounded();
+        let (result_tx, _) = channel::unbounded();
         let symbol = "BTCUSDT".to_string();
-        MatchingEngine::new(symbol, rx)
+        MatchingEngine::new(symbol, engine_rx, result_tx)
     }
 
     fn limit_order(side: Side, tif: TimeInForce, price: i64, qty: i64) -> Order {

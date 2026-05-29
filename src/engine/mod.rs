@@ -3,7 +3,9 @@ mod matching_engine;
 mod orderbook;
 pub mod result;
 
-use crate::engine::{command::EngineCommand, matching_engine::MatchingEngine};
+use crate::engine::{
+    command::EngineCommand, matching_engine::MatchingEngine, result::EngineResult,
+};
 use crossbeam::channel::Sender;
 use std::{collections::HashMap, thread::JoinHandle};
 use tracing::error;
@@ -20,9 +22,11 @@ impl EngineDispatcher {
 
         for symbol in symbols {
             let (engine_tx, engine_rx) = crossbeam::channel::bounded::<EngineCommand>(1024);
+            let (result_tx, _) = crossbeam::channel::bounded::<EngineResult>(1024);
+
             let sym = symbol.clone();
             let handle = std::thread::spawn(move || {
-                MatchingEngine::new(sym, engine_rx).run();
+                MatchingEngine::new(sym, engine_rx, result_tx).run();
             });
 
             handles.push(handle);
