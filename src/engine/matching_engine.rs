@@ -35,6 +35,10 @@ impl MatchingEngine {
 
     /// 주문 접수
     fn place_order(&mut self, mut incoming: Order) {
+        if matches!(incoming.tif, TimeInForce::GTC) && incoming.order_type != OrderType::Limit {
+            return;
+        }
+
         if matches!(incoming.tif, TimeInForce::FOK) && !self.validation_fok_order(&incoming) {
             return;
         }
