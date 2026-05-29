@@ -34,100 +34,98 @@ impl MatchingEngine {
     }
 
     /// 주문 접수
-    fn place_order(&mut self, mut incoming: Order) {
-        if matches!(incoming.tif, TimeInForce::GTC) && incoming.order_type != OrderType::Limit {
+    fn place_order(&mut self, mut taker: Order) {
+        if matches!(taker.tif, TimeInForce::GTC) && taker.order_type != OrderType::Limit {
             return;
         }
 
-        if matches!(incoming.tif, TimeInForce::FOK) && !self.validation_fok_order(&incoming) {
+        if matches!(taker.tif, TimeInForce::FOK) && !self.validation_fok_order(&taker) {
             return;
         }
 
-        while let Some((price, restings)) = self.orderbook.get_best_opposite(&incoming.side) {
-            if !can_match(&incoming, price) {
+        while let Some((price, makers)) = self.orderbook.get_best_opposite(&taker.side) {
+            if !can_match(&taker, price) {
                 break;
             }
 
-            incoming = self.match_loop(incoming, restings);
+            taker = self.match_loop(taker, makers);
 
-            if incoming.is_filled() {
+            if taker.is_filled() {
                 break;
             }
         }
 
-        if !incoming.is_filled() && matches!(incoming.tif, TimeInForce::GTC) {
-            self.orderbook.add_order(incoming);
+        if !taker.is_filled() && matches!(taker.tif, TimeInForce::GTC) {
+            self.orderbook.add_order(taker);
         }
     }
 
     /// 단일 Price level과 주문 매칭 수행
-    fn match_loop(&mut self, mut incoming: Order, restings: VecDeque<Uuid>) -> Order {
-        for rest_id in restings {
-            let rest_filled = {
-                let rest = self.orderbook.get_order_mut(&rest_id).unwrap();
-                let rest_price = rest.price.unwrap();
+    fn match_loop(&mut self, mut taker: Order, makers: VecDeque<Uuid>) -> Order {
+        for maker_id in makers {
+            let maker_filled = {
+                let maker = self.orderbook.get_order_mut(&maker_id).unwrap();
+                let maker_price = maker.price.unwrap();
 
-                let fill_base = match incoming.size {
-                    OrderSize::Base(_) => rest
+                let fill_base = match taker.size {
+                    OrderSize::Base(_) => maker
                         .remaining_base_qty()
                         .unwrap()
-                        .min(incoming.remaining_base_qty().unwrap()),
-                    OrderSize::Quote(_) => rest
+                        .min(taker.remaining_base_qty().unwrap()),
+                    OrderSize::Quote(_) => maker
                         .remaining_base_qty()
                         .unwrap()
-                        .min(incoming.remaining_quote_qty().unwrap() / rest_price),
+                        .min(taker.remaining_quote_qty().unwrap() / maker_price),
                 };
-                let fill_quote = fill_base * rest_price;
-                rest.fill(fill_base, fill_quote);
-                incoming.fill(fill_base, fill_quote);
+                let fill_quote = fill_base * maker_price;
+                maker.fill(fill_base, fill_quote);
+                taker.fill(fill_base, fill_quote);
 
-                rest.is_filled()
+                maker.is_filled()
             };
 
-            if rest_filled {
-                self.orderbook.remove_order(rest_id);
+            if maker_filled {
+                self.orderbook.remove_order(maker_id);
             }
 
-            if incoming.is_filled() {
+            if taker.is_filled() {
                 break;
             }
         }
 
-        incoming
+        taker
     }
 
-    fn validation_fok_order(&self, incoming: &Order) -> bool {
-        match incoming.size {
+    fn validation_fok_order(&self, taker: &Order) -> bool {
+        match taker.size {
             OrderSize::Base(qty) => {
-                let price = match incoming.order_type {
+                let price = match taker.order_type {
                     // Market 주문은 price 미존재
-                    OrderType::Market => match incoming.side {
+                    OrderType::Market => match taker.side {
                         Side::Buy => Decimal::MAX,
                         Side::Sell => Decimal::ZERO,
                     },
-                    OrderType::Limit => incoming.price.unwrap(),
+                    OrderType::Limit => taker.price.unwrap(),
                 };
 
-                self.orderbook
-                    .can_fully_fill_base(incoming.side, qty, price)
+                self.orderbook.can_fully_fill_base(taker.side, qty, price)
             }
             OrderSize::Quote(quote_qty) => {
                 // MARKET + BUY + QUOTE 전용
                 // LIMIT + BUY + QUOTE는 엔진 진입전 base로 변환됨
-                self.orderbook
-                    .can_fully_fill_quote(incoming.side, quote_qty)
+                self.orderbook.can_fully_fill_quote(taker.side, quote_qty)
             }
         }
     }
 }
 
-/// incoming 주문과 반대 호가 가격 조건 확인
-fn can_match(incoming: &Order, resting_price: Decimal) -> bool {
-    match incoming.size {
-        OrderSize::Base(_) => match incoming.order_type {
-            OrderType::Limit => match incoming.side {
-                Side::Buy => resting_price <= incoming.price.unwrap(),
-                Side::Sell => resting_price >= incoming.price.unwrap(),
+/// taker 주문과 반대 호가 가격 조건 확인
+fn can_match(taker: &Order, maker_price: Decimal) -> bool {
+    match taker.size {
+        OrderSize::Base(_) => match taker.order_type {
+            OrderType::Limit => match taker.side {
+                Side::Buy => maker_price <= taker.price.unwrap(),
+                Side::Sell => maker_price >= taker.price.unwrap(),
             },
             OrderType::Market => true,
         },
