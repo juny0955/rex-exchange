@@ -1,6 +1,7 @@
 pub mod command;
 mod matching_engine;
 mod orderbook;
+pub mod result;
 
 use crate::engine::{command::EngineCommand, matching_engine::MatchingEngine};
 use crossbeam::channel::Sender;
@@ -18,7 +19,7 @@ impl EngineDispatcher {
         let mut handles = Vec::new();
 
         for symbol in symbols {
-            let (engine_tx, engine_rx) = crossbeam::channel::bounded(1024);
+            let (engine_tx, engine_rx) = crossbeam::channel::bounded::<EngineCommand>(1024);
             let sym = symbol.clone();
             let handle = std::thread::spawn(move || {
                 MatchingEngine::new(sym, engine_rx).run();
