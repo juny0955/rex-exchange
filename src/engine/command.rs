@@ -5,12 +5,14 @@ use crate::domain::order::Order;
 #[derive(Debug)]
 pub enum EngineCommand {
     Place(Order),
+    Cancel(Uuid),
 }
 
 impl EngineCommand {
     pub fn order_id(&self) -> Uuid {
         match self {
             EngineCommand::Place(o) => o.order_id,
+            EngineCommand::Cancel(order_id) => *order_id,
         }
     }
 }
