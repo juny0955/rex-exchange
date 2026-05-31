@@ -61,8 +61,8 @@ impl OrderBook {
 
     /// 주문 삭제
     /// TODO: 현재 O(n) 개선 필요
-    pub fn remove_order(&mut self, order_id: Uuid) {
-        let order = self.index.remove(&order_id).unwrap();
+    pub fn remove_order(&mut self, order_id: Uuid) -> Option<Order> {
+        let order = self.index.remove(&order_id)?;
         let price = order.price.unwrap();
 
         match order.side {
@@ -87,6 +87,8 @@ impl OrderBook {
                 }
             }
         }
+
+        Some(order)
     }
 
     /// 전량 체결 가능 여부 확인 (base)
