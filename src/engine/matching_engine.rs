@@ -11,8 +11,9 @@ use crate::{
         command::EngineCommand,
         orderbook::OrderBook,
         result::{
-            CancelledReason, EngineResult, OrderSnapshot, PlaceOrderOutcome, PlaceOrderResult,
-            RejectedReason, TradeResult,
+            CancelOrderOutcome, CancelOrderResult, CancelRejectedReason, CancelledReason,
+            EngineResult, OrderSnapshot, PlaceOrderOutcome, PlaceOrderResult, RejectedReason,
+            TradeResult,
         },
     },
 };
@@ -42,15 +43,14 @@ impl MatchingEngine {
     pub fn run(&mut self) {
         info!(symbol = %self.symbol, "엔진 시작");
         while let Ok(command) = self.engine_rx.recv() {
-            match command {
-                EngineCommand::Place(order) => {
-                    let order_id = order.order_id;
-                    let result = self.place_order(order);
+            let order_id = command.order_id();
+            let result = match command {
+                EngineCommand::Place(order) => self.place_order(order),
+                EngineCommand::Cancel(order_id) => self.cancel_order(order_id),
+            };
 
-                    if let Err(e) = self.result_tx.send(result) {
-                        error!(symbol = %self.symbol, order_id = %order_id, error = %e, "매칭 결과 전송 오류");
-                    }
-                }
+            if let Err(e) = self.result_tx.send(result) {
+                error!(symbol = %self.symbol, order_id = %order_id, error = %e, "매칭 결과 전송 오류");
             }
         }
     }
@@ -91,6 +91,25 @@ impl MatchingEngine {
             outcome,
             trades,
             updated_makers,
+        })
+    }
+
+    /// 주문 취소
+    fn cancel_order(&mut self, order_id: Uuid) -> EngineResult {
+        let Some(mut order) = self.orderbook.remove_order(order_id) else {
+            return EngineResult::Cancel(CancelOrderResult {
+                symbol: self.symbol.clone(),
+                order_id,
+                outcome: CancelOrderOutcome::Rejected(CancelRejectedReason::OrderNotFound),
+            });
+        };
+
+        order.cancel();
+
+        EngineResult::Cancel(CancelOrderResult {
+            symbol: self.symbol.clone(),
+            order_id,
+            outcome: CancelOrderOutcome::Cancelled(OrderSnapshot::from(&order)),
         })
     }
 
