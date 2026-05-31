@@ -78,6 +78,11 @@ impl Order {
         self.updated_at = Utc::now();
     }
 
+    pub fn cancel(&mut self) {
+        self.status = OrderStatus::Canceled;
+        self.updated_at = Utc::now();
+    }
+
     pub fn remaining_base_qty(&self) -> Option<Decimal> {
         match self.size {
             OrderSize::Base(qty) => Some(qty - self.executed_base_qty),
