@@ -359,6 +359,7 @@ mod tests {
     use uuid::Uuid;
 
     use crate::domain::order::{Order, OrderSize, OrderStatus, OrderType, Side, TimeInForce};
+    use crate::engine::result::{CancelOrderOutcome, CancelRejectedReason, EngineResult};
 
     fn make_engine() -> MatchingEngine {
         let (_, engine_rx) = channel::unbounded();
@@ -497,5 +498,65 @@ mod tests {
         engine.place_order(market_quote_order(Side::Sell, 500));
 
         assert!(engine.orderbook.get_best_opposite(&Side::Sell).is_some());
+    }
+
+    #[test]
+    fn 주문_취소_성공_테스트() {
+        let mut engine = make_engine();
+        let order = limit_order(Side::Buy, TimeInForce::GTC, 100, 10);
+        let order_id = order.order_id;
+        engine.orderbook.add_order(order);
+
+        let result = engine.cancel_order(order_id);
+
+        let EngineResult::Cancel(r) = result else {
+            panic!("Cancel 결과여야 함");
+        };
+        let CancelOrderOutcome::Cancelled(snapshot) = r.outcome else {
+            panic!("취소 성공이어야 함");
+        };
+        assert_eq!(snapshot.order_id, order_id);
+        assert_eq!(snapshot.status, OrderStatus::Canceled);
+        assert_eq!(snapshot.executed_base_qty, Decimal::ZERO);
+        assert_eq!(snapshot.remaining_base_qty, Some(Decimal::new(10, 0)));
+        assert!(engine.orderbook.get_best_opposite(&Side::Sell).is_none());
+    }
+
+    #[test]
+    fn 부분_체결_후_취소_테스트() {
+        let mut engine = make_engine();
+        engine.orderbook.add_order(limit_order(Side::Sell, TimeInForce::GTC, 100, 5));
+
+        let buy = limit_order(Side::Buy, TimeInForce::GTC, 100, 10);
+        let buy_id = buy.order_id;
+        engine.place_order(buy);
+
+        let result = engine.cancel_order(buy_id);
+
+        let EngineResult::Cancel(r) = result else {
+            panic!("Cancel 결과여야 함");
+        };
+        let CancelOrderOutcome::Cancelled(snapshot) = r.outcome else {
+            panic!("취소 성공이어야 함");
+        };
+        assert_eq!(snapshot.status, OrderStatus::Canceled);
+        assert_eq!(snapshot.executed_base_qty, Decimal::new(5, 0));
+        assert_eq!(snapshot.remaining_base_qty, Some(Decimal::new(5, 0)));
+        assert!(engine.orderbook.get_best_opposite(&Side::Sell).is_none());
+    }
+
+    #[test]
+    fn 존재하지_않는_주문_취소_테스트() {
+        let mut engine = make_engine();
+
+        let result = engine.cancel_order(Uuid::now_v7());
+
+        let EngineResult::Cancel(r) = result else {
+            panic!("Cancel 결과여야 함");
+        };
+        assert!(matches!(
+            r.outcome,
+            CancelOrderOutcome::Rejected(CancelRejectedReason::OrderNotFound)
+        ));
     }
 }
