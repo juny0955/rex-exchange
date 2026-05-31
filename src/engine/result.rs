@@ -1,7 +1,7 @@
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
-use crate::domain::order::OrderStatus;
+use crate::domain::order::{Order, OrderStatus};
 
 #[derive(Debug, Clone)]
 pub enum EngineResult {
@@ -19,7 +19,6 @@ pub struct PlaceOrderResult {
 
 #[derive(Debug, Clone)]
 pub enum PlaceOrderOutcome {
-    Accepted,
     Rested,
     Filled,
     PartiallyFilledAndRested,
@@ -46,6 +45,19 @@ pub struct OrderSnapshot {
     pub remaining_base_qty: Option<Decimal>,
     pub remaining_quote_qty: Option<Decimal>,
     pub status: OrderStatus,
+}
+
+impl From<&Order> for OrderSnapshot {
+    fn from(o: &Order) -> Self {
+        Self {
+            order_id: o.order_id,
+            executed_base_qty: o.executed_base_qty,
+            executed_quote_qty: o.executed_quote_qty,
+            remaining_base_qty: o.remaining_base_qty(),
+            remaining_quote_qty: o.remaining_quote_qty(),
+            status: o.status,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
