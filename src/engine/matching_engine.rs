@@ -5,14 +5,14 @@ use rust_decimal::Decimal;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-use crate::engine::result::{OrderSnapshot, TradeResult};
 use crate::{
     domain::order::{Order, OrderSize, OrderType, Side, TimeInForce},
     engine::{
         command::EngineCommand,
         orderbook::OrderBook,
         result::{
-            CancelledReason, EngineResult, PlaceOrderOutcome, PlaceOrderResult, RejectedReason,
+            CancelledReason, EngineResult, OrderSnapshot, PlaceOrderOutcome, PlaceOrderResult,
+            RejectedReason, TradeResult,
         },
     },
 };
@@ -57,7 +57,16 @@ impl MatchingEngine {
 
     /// 주문 접수
     fn place_order(&mut self, taker: Order) -> EngineResult {
-        self.log_order_received(&taker);
+        debug!(
+            symbol = %self.symbol,
+            order_id = %taker.order_id,
+            side = ?taker.side,
+            order_type = ?taker.order_type,
+            tif = ?taker.tif,
+            price = ?taker.price,
+            size = ?taker.size,
+            "주문 접수"
+        );
 
         if let Some(outcome) = self.validate_before_matching(&taker) {
             return EngineResult::Place(PlaceOrderResult {
@@ -71,26 +80,10 @@ impl MatchingEngine {
 
         let (taker, trades, updated_makers) = self.match_order(taker);
         let taker_order_id = taker.order_id;
-        let taker_filled = taker.is_filled();
-        let taker_tif = taker.tif;
+
+        let outcome = resolve_place_outcome(taker.is_filled(), !trades.is_empty(), taker.tif);
 
         self.add_to_orderbook_if_remaining(taker);
-
-        let outcome = match (
-            taker_filled,
-            trades.is_empty(),
-            matches!(taker_tif, TimeInForce::GTC),
-        ) {
-            (true, _, _) => PlaceOrderOutcome::Filled,
-            (false, true, true) => PlaceOrderOutcome::Rested,
-            (false, true, false) => {
-                PlaceOrderOutcome::Cancelled(CancelledReason::IocRemainingCancelled)
-            }
-            (false, false, true) => PlaceOrderOutcome::PartiallyFilledAndRested,
-            (false, false, false) => PlaceOrderOutcome::PartiallyFilledAndCancelled(
-                CancelledReason::IocRemainingCancelled,
-            ),
-        };
 
         EngineResult::Place(PlaceOrderResult {
             symbol: self.symbol.clone(),
@@ -107,7 +100,6 @@ impl MatchingEngine {
 
         while let Some((price, makers)) = self.orderbook.get_best_opposite(&taker.side) {
             if !can_match(&taker, price) {
-                self.log_matching_stopped_by_price(&taker, price);
                 break;
             }
 
@@ -207,21 +199,42 @@ impl MatchingEngine {
         if matches!(taker.size, OrderSize::Quote(_))
             && !(matches!(taker.order_type, OrderType::Market) && matches!(taker.side, Side::Buy))
         {
-            self.log_quote_rejected(taker);
+            warn!(
+                symbol = %self.symbol,
+                order_id = %taker.order_id,
+                side = ?taker.side,
+                order_type = ?taker.order_type,
+                size = ?taker.size,
+                "주문 거부: Quote size는 MARKET BUY만 허용"
+            );
             return Some(PlaceOrderOutcome::Rejected(RejectedReason::InvalidOrder(
                 "Quote 주문은 Market Buy만 허용".to_string(),
             )));
         }
 
         if matches!(taker.tif, TimeInForce::GTC) && taker.order_type != OrderType::Limit {
-            self.log_gtc_rejected(taker);
+            warn!(
+                symbol = %self.symbol,
+                order_id = %taker.order_id,
+                order_type = ?taker.order_type,
+                tif = ?taker.tif,
+                "주문 거부: GTC 주문 LIMIT만 허용"
+            );
             return Some(PlaceOrderOutcome::Rejected(RejectedReason::InvalidOrder(
                 "GTC 주문은 Limit만 허용".to_string(),
             )));
         }
 
         if matches!(taker.tif, TimeInForce::FOK) && !self.can_fully_fill_fok(taker) {
-            self.log_fok_cancelled(taker);
+            debug!(
+                symbol = %self.symbol,
+                order_id = %taker.order_id,
+                side = ?taker.side,
+                order_type = ?taker.order_type,
+                price = ?taker.price,
+                size = ?taker.size,
+                "주문 취소: FOK 전량 체결 불가"
+            );
             return Some(PlaceOrderOutcome::Cancelled(
                 CancelledReason::FokCannotFullyFill,
             ));
@@ -237,7 +250,7 @@ impl MatchingEngine {
                     // Market 주문은 price 미존재
                     OrderType::Market => match taker.side {
                         Side::Buy => Decimal::MAX,
-                        Side::Sell => Decimal::ZERO,
+                        Side::Sell => Decimal::MIN,
                     },
                     OrderType::Limit => {
                         let Some(price) = taker.price else {
@@ -260,63 +273,6 @@ impl MatchingEngine {
                 self.orderbook.can_fully_fill_quote(taker.side, quote_qty)
             }
         }
-    }
-
-    fn log_order_received(&self, taker: &Order) {
-        debug!(
-            symbol = %self.symbol,
-            order_id = %taker.order_id,
-            side = ?taker.side,
-            order_type = ?taker.order_type,
-            tif = ?taker.tif,
-            price = ?taker.price,
-            size = ?taker.size,
-            "주문 접수"
-        );
-    }
-
-    fn log_gtc_rejected(&self, taker: &Order) {
-        warn!(
-            symbol = %self.symbol,
-            order_id = %taker.order_id,
-            order_type = ?taker.order_type,
-            tif = ?taker.tif,
-            "주문 거부: GTC 주문 LIMIT만 허용"
-        );
-    }
-
-    fn log_quote_rejected(&self, taker: &Order) {
-        warn!(
-            symbol = %self.symbol,
-            order_id = %taker.order_id,
-            side = ?taker.side,
-            order_type = ?taker.order_type,
-            size = ?taker.size,
-            "주문 거부: Quote size는 MARKET BUY만 허용"
-        );
-    }
-
-    fn log_fok_cancelled(&self, taker: &Order) {
-        debug!(
-            symbol = %self.symbol,
-            order_id = %taker.order_id,
-            side = ?taker.side,
-            order_type = ?taker.order_type,
-            price = ?taker.price,
-            size = ?taker.size,
-            "주문 취소: FOK 전량 체결 불가"
-        );
-    }
-
-    fn log_matching_stopped_by_price(&self, taker: &Order, maker_price: Decimal) {
-        debug!(
-            symbol = %self.symbol,
-            order_id = %taker.order_id,
-            side = ?taker.side,
-            taker_price = ?taker.price,
-            best_maker_price = %maker_price,
-            "매칭 중단: 가격 조건 불일치"
-        );
     }
 }
 
@@ -349,6 +305,28 @@ fn calc_fill_base(taker: &Order, maker: &Order) -> Option<Decimal> {
             let taker_remaining_quote = taker.remaining_quote_qty()?;
             let maker_price = maker.price?;
             Some(maker_remaining.min(taker_remaining_quote / maker_price))
+        }
+    }
+}
+
+fn resolve_place_outcome(
+    taker_filled: bool,
+    has_trades: bool,
+    tif: TimeInForce,
+) -> PlaceOrderOutcome {
+    match (taker_filled, has_trades, matches!(tif, TimeInForce::GTC)) {
+        (true, _, _) => PlaceOrderOutcome::Filled,
+
+        (false, false, true) => PlaceOrderOutcome::Rested,
+
+        (false, false, false) => {
+            PlaceOrderOutcome::Cancelled(CancelledReason::IocRemainingCancelled)
+        }
+
+        (false, true, true) => PlaceOrderOutcome::PartiallyFilledAndRested,
+
+        (false, true, false) => {
+            PlaceOrderOutcome::PartiallyFilledAndCancelled(CancelledReason::IocRemainingCancelled)
         }
     }
 }
