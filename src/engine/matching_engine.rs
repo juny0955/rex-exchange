@@ -119,6 +119,7 @@ impl MatchingEngine {
         debug!(symbol = %self.symbol, order_id = %order_id, "주문 취소");
 
         let Some(mut order) = self.orderbook.remove_order(order_id) else {
+            warn!(symbol = %self.symbol, order_id = %order_id, "주문 취소 거부: 주문 찾을 수 없음");
             return EngineResult::Cancel(CancelOrderResult {
                 symbol: self.symbol.clone(),
                 order_id,
@@ -126,7 +127,10 @@ impl MatchingEngine {
             });
         };
 
-        order.cancel();
+        // orderbook 내부 주문은 New, PartiallyFilled 상태이어야만함
+        order
+            .cancel()
+            .expect("오더북 불변식 위반: 오더북 내 주문은 취소 가능한 상태여야한다");
 
         EngineResult::Cancel(CancelOrderResult {
             symbol: self.symbol.clone(),
@@ -172,8 +176,16 @@ impl MatchingEngine {
             };
             let fill_quote = fill_base * maker_price;
 
-            maker.fill(fill_base, fill_quote);
-            result.taker.fill(fill_base, fill_quote);
+            let filled_maker = maker
+                .fill(fill_base, fill_quote)
+                .expect("오더북 불변식 위반: 메이커 체결 불가");
+            let filled_taker = result
+                .taker
+                .fill(fill_base, fill_quote)
+                .expect("오더북 불변식 위반: 테이커 체결 불가");
+
+            *maker = filled_maker;
+            result.taker = filled_taker;
 
             result.trades.push(TradeResult {
                 trade_id: Uuid::now_v7(),
@@ -322,6 +334,7 @@ fn can_match(taker: &Order, maker_price: Decimal) -> bool {
     }
 }
 
+/// taker.size에 따라 체결 수량을 계산한다
 fn calc_fill_base(taker: &Order, maker: &Order) -> Option<Decimal> {
     let maker_remaining = maker.remaining_base_qty()?;
 
@@ -338,6 +351,7 @@ fn calc_fill_base(taker: &Order, maker: &Order) -> Option<Decimal> {
     }
 }
 
+/// 매칭 결과에 따른 주문 결과를 생성한다
 fn resolve_place_outcome(
     taker_filled: bool,
     has_trades: bool,
@@ -345,15 +359,11 @@ fn resolve_place_outcome(
 ) -> PlaceOrderOutcome {
     match (taker_filled, has_trades, matches!(tif, TimeInForce::GTC)) {
         (true, _, _) => PlaceOrderOutcome::Filled,
-
         (false, false, true) => PlaceOrderOutcome::Rested,
-
         (false, false, false) => {
             PlaceOrderOutcome::Cancelled(CancelledReason::IocRemainingCancelled)
         }
-
         (false, true, true) => PlaceOrderOutcome::PartiallyFilledAndRested,
-
         (false, true, false) => {
             PlaceOrderOutcome::PartiallyFilledAndCancelled(CancelledReason::IocRemainingCancelled)
         }
