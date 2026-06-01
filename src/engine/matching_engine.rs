@@ -18,6 +18,22 @@ use crate::{
     },
 };
 
+struct MatchResult {
+    taker: Order,
+    trades: Vec<TradeResult>,
+    updated_makers: Vec<OrderSnapshot>,
+}
+
+impl MatchResult {
+    fn new(taker: Order) -> Self {
+        Self {
+            taker,
+            trades: Vec::new(),
+            updated_makers: Vec::new(),
+        }
+    }
+}
+
 pub struct MatchingEngine {
     symbol: String,
     engine_rx: Receiver<EngineCommand>,
@@ -78,11 +94,15 @@ impl MatchingEngine {
             });
         }
 
-        let (taker, trades, updated_makers) = self.match_order(taker);
-        let taker_order_id = taker.order_id;
+        let MatchResult {
+            taker,
+            trades,
+            updated_makers,
+        } = self.match_order(taker);
 
         let outcome = resolve_place_outcome(taker.is_filled(), !trades.is_empty(), taker.tif);
 
+        let taker_order_id = taker.order_id;
         self.add_to_orderbook_if_remaining(taker);
 
         EngineResult::Place(PlaceOrderResult {
@@ -96,6 +116,8 @@ impl MatchingEngine {
 
     /// 주문 취소
     fn cancel_order(&mut self, order_id: Uuid) -> EngineResult {
+        debug!(symbol = %self.symbol, order_id = %order_id, "주문 취소");
+
         let Some(mut order) = self.orderbook.remove_order(order_id) else {
             return EngineResult::Cancel(CancelOrderResult {
                 symbol: self.symbol.clone(),
@@ -113,37 +135,27 @@ impl MatchingEngine {
         })
     }
 
-    fn match_order(&mut self, mut taker: Order) -> (Order, Vec<TradeResult>, Vec<OrderSnapshot>) {
-        let mut trade_results = Vec::new();
-        let mut updated_makers = Vec::new();
+    /// 주문 매칭
+    fn match_order(&mut self, taker: Order) -> MatchResult {
+        let mut result = MatchResult::new(taker);
 
-        while let Some((price, makers)) = self.orderbook.get_best_opposite(&taker.side) {
-            if !can_match(&taker, price) {
+        while let Some((price, makers)) = self.orderbook.get_best_opposite(&result.taker.side) {
+            if !can_match(&result.taker, price) {
                 break;
             }
 
-            let (new_taker, trades, up_makers) = self.match_price_level(taker, makers);
-            taker = new_taker;
-            trade_results.extend(trades);
-            updated_makers.extend(up_makers);
+            self.match_price_level(makers, &mut result);
 
-            if taker.is_filled() {
+            if result.taker.is_filled() {
                 break;
             }
         }
 
-        (taker, trade_results, updated_makers)
+        result
     }
 
     /// 단일 Price level과 주문 매칭 수행
-    fn match_price_level(
-        &mut self,
-        mut taker: Order,
-        makers: VecDeque<Uuid>,
-    ) -> (Order, Vec<TradeResult>, Vec<OrderSnapshot>) {
-        let mut trade_results = Vec::new();
-        let mut updated_makers = Vec::new();
-
+    fn match_price_level(&mut self, makers: VecDeque<Uuid>, result: &mut MatchResult) {
         for maker_id in makers {
             let Some(maker) = self.orderbook.get_order_mut(&maker_id) else {
                 error!(symbol = %self.symbol, maker_order_id = %maker_id, "오더북 불일치: 인덱스에 주문 없음");
@@ -154,33 +166,33 @@ impl MatchingEngine {
                 continue;
             };
 
-            let Some(fill_base) = calc_fill_base(&taker, maker) else {
-                error!(symbol = %self.symbol, taker_order_id = %taker.order_id, maker_order_id = %maker.order_id, "체결 수량 계산 실패");
+            let Some(fill_base) = calc_fill_base(&result.taker, maker) else {
+                error!(symbol = %self.symbol, taker_order_id = %result.taker.order_id, maker_order_id = %maker.order_id, "체결 수량 계산 실패");
                 continue;
             };
             let fill_quote = fill_base * maker_price;
 
             maker.fill(fill_base, fill_quote);
-            taker.fill(fill_base, fill_quote);
+            result.taker.fill(fill_base, fill_quote);
 
-            trade_results.push(TradeResult {
+            result.trades.push(TradeResult {
                 trade_id: Uuid::now_v7(),
-                taker_order_id: taker.order_id,
+                taker_order_id: result.taker.order_id,
                 maker_order_id: maker_id,
                 price: maker_price,
                 base_qty: fill_base,
                 quote_qty: fill_quote,
             });
-            updated_makers.push(OrderSnapshot::from(&*maker));
+            result.updated_makers.push(OrderSnapshot::from(&*maker));
 
             info!(
                 symbol = %self.symbol,
-                taker_order_id = %taker.order_id,
+                taker_order_id = %result.taker.order_id,
                 maker_order_id = %maker.order_id,
                 price = %maker_price,
                 fill_base = %fill_base,
                 fill_quote = %fill_quote,
-                taker_filled = taker.is_filled(),
+                taker_filled = result.taker.is_filled(),
                 maker_filled = maker.is_filled(),
                 "주문 체결"
             );
@@ -190,12 +202,10 @@ impl MatchingEngine {
                 self.orderbook.remove_order(maker_id);
             }
 
-            if taker.is_filled() {
+            if result.taker.is_filled() {
                 break;
             }
         }
-
-        (taker, trade_results, updated_makers)
     }
 
     fn add_to_orderbook_if_remaining(&mut self, taker: Order) {
@@ -525,7 +535,9 @@ mod tests {
     #[test]
     fn 부분_체결_후_취소_테스트() {
         let mut engine = make_engine();
-        engine.orderbook.add_order(limit_order(Side::Sell, TimeInForce::GTC, 100, 5));
+        engine
+            .orderbook
+            .add_order(limit_order(Side::Sell, TimeInForce::GTC, 100, 5));
 
         let buy = limit_order(Side::Buy, TimeInForce::GTC, 100, 10);
         let buy_id = buy.order_id;
