@@ -111,6 +111,46 @@ impl Order {
         Ok(())
     }
 
+    /// 주문 정정
+    /// 불변으로 새로운 Order 반환
+    pub fn amend(
+        &self,
+        new_price: Option<Decimal>,
+        new_base_qty: Option<Decimal>,
+    ) -> Result<Order, OrderError> {
+        if self.is_completed() {
+            return Err(OrderError::AlreadyCompleted);
+        }
+
+        let current_price = self.price.ok_or(OrderError::AmendNotAllowed)?;
+        let current_base_qty = match self.size {
+            OrderSize::Base(qty) => qty,
+            OrderSize::Quote(_) => return Err(OrderError::AmendNotAllowed),
+        };
+
+        let next_price = new_price.unwrap_or(current_price);
+        let next_base_qty = new_base_qty.unwrap_or(current_base_qty);
+
+        if next_base_qty < self.executed_base_qty {
+            return Err(OrderError::AmendQtyBelowExecuted);
+        }
+
+        let mut next = self.clone();
+        next.price = Some(next_price);
+        next.size = OrderSize::Base(next_base_qty);
+
+        next.status = if next.executed_base_qty == Decimal::ZERO {
+            OrderStatus::New
+        } else if next.is_filled_by_size() {
+            OrderStatus::Filled
+        } else {
+            OrderStatus::PartiallyFilled
+        };
+        next.updated_at = Utc::now();
+
+        Ok(next)
+    }
+
     pub fn remaining_base_qty(&self) -> Option<Decimal> {
         match self.size {
             OrderSize::Base(qty) => Some(qty - self.executed_base_qty),
@@ -264,5 +304,56 @@ mod tests {
             .unwrap();
         assert_eq!(order.status, OrderStatus::Filled);
         assert_eq!(order.cancel(), Err(OrderError::AlreadyCompleted));
+    }
+
+    #[test]
+    fn 주문_정정_가격_수량_변경_테스트() {
+        let order = make_base_order(Decimal::new(10, 0));
+        let amended = order
+            .amend(Some(Decimal::new(200, 0)), Some(Decimal::new(20, 0)))
+            .unwrap();
+        assert_eq!(amended.price, Some(Decimal::new(200, 0)));
+        assert_eq!(amended.size, OrderSize::Base(Decimal::new(20, 0)));
+        assert_eq!(amended.status, OrderStatus::New);
+    }
+
+    #[test]
+    fn 부분체결_주문_정정_테스트() {
+        let order = make_base_order(Decimal::new(10, 0));
+        let order = order
+            .fill(Decimal::new(4, 0), Decimal::new(400, 0))
+            .unwrap();
+        let amended = order
+            .amend(None, Some(Decimal::new(8, 0)))
+            .unwrap();
+        assert_eq!(amended.size, OrderSize::Base(Decimal::new(8, 0)));
+        assert_eq!(amended.status, OrderStatus::PartiallyFilled);
+    }
+
+    #[test]
+    fn quote_주문_정정_불허_테스트() {
+        let order = make_quote_order(Decimal::new(1000, 0));
+        let result = order.amend(None, Some(Decimal::new(5, 0)));
+        assert!(matches!(result, Err(OrderError::AmendNotAllowed)));
+    }
+
+    #[test]
+    fn 완전체결_주문_정정_불허_테스트() {
+        let order = make_base_order(Decimal::new(10, 0));
+        let order = order
+            .fill(Decimal::new(10, 0), Decimal::new(1000, 0))
+            .unwrap();
+        let result = order.amend(None, Some(Decimal::new(20, 0)));
+        assert!(matches!(result, Err(OrderError::AlreadyCompleted)));
+    }
+
+    #[test]
+    fn 체결수량_미만_정정_불허_테스트() {
+        let order = make_base_order(Decimal::new(10, 0));
+        let order = order
+            .fill(Decimal::new(5, 0), Decimal::new(500, 0))
+            .unwrap();
+        let result = order.amend(None, Some(Decimal::new(3, 0)));
+        assert!(matches!(result, Err(OrderError::AmendQtyBelowExecuted)));
     }
 }

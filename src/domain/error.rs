@@ -5,4 +5,6 @@ pub enum OrderError {
     AlreadyCompleted,
     OverFilled,
     AlreadyCancelled,
+    AmendNotAllowed,
+    AmendQtyBelowExecuted,
 }
