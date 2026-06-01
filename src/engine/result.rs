@@ -7,6 +7,7 @@ use crate::domain::order::{Order, OrderStatus};
 pub enum EngineResult {
     Place(PlaceOrderResult),
     Cancel(CancelOrderResult),
+    Amend(AmendOrderResult),
 }
 
 #[derive(Debug, Clone)]
@@ -26,6 +27,13 @@ pub struct CancelOrderResult {
 }
 
 #[derive(Debug, Clone)]
+pub struct AmendOrderResult {
+    pub symbol: String,
+    pub order_id: Uuid,
+    pub outcome: AmendOrderOutcome,
+}
+
+#[derive(Debug, Clone)]
 pub enum PlaceOrderOutcome {
     Rested,
     Filled,
@@ -39,6 +47,16 @@ pub enum PlaceOrderOutcome {
 pub enum CancelOrderOutcome {
     Cancelled(OrderSnapshot),
     Rejected(CancelRejectedReason),
+}
+
+#[derive(Debug, Clone)]
+pub enum AmendOrderOutcome {
+    Amended(OrderSnapshot),
+    CancelReplaced {
+        canceled: OrderSnapshot,
+        placed: PlaceOrderResult,
+    },
+    Rejected(AmendRejectedReason),
 }
 
 #[derive(Debug, Clone)]
@@ -87,5 +105,10 @@ pub enum CancelledReason {
 
 #[derive(Debug, Clone)]
 pub enum CancelRejectedReason {
+    OrderNotFound,
+}
+
+#[derive(Debug, Clone)]
+pub enum AmendRejectedReason {
     OrderNotFound,
 }
