@@ -56,7 +56,9 @@ pub struct Order {
 }
 
 impl Order {
-    pub fn fill(&mut self, base_qty: Decimal, quote_qty: Decimal) -> Result<(), OrderError> {
+    /// 주문 체결
+    /// 불변으로 새로운 Order 반환
+    pub fn fill(&self, base_qty: Decimal, quote_qty: Decimal) -> Result<Order, OrderError> {
         if base_qty <= Decimal::ZERO {
             return Err(OrderError::InvalidFillBaseQty);
         }
@@ -80,17 +82,19 @@ impl Order {
             }
         }
 
-        self.executed_base_qty += base_qty;
-        self.executed_quote_qty += quote_qty;
+        let mut new_order = self.clone();
 
-        self.status = if self.is_filled_by_size() {
+        new_order.executed_base_qty += base_qty;
+        new_order.executed_quote_qty += quote_qty;
+
+        new_order.status = if new_order.is_filled_by_size() {
             OrderStatus::Filled
         } else {
             OrderStatus::PartiallyFilled
         };
 
-        self.updated_at = Utc::now();
-        Ok(())
+        new_order.updated_at = Utc::now();
+        Ok(new_order)
     }
 
     pub fn cancel(&mut self) -> Result<(), OrderError> {
@@ -179,16 +183,18 @@ mod tests {
 
     #[test]
     fn base_주문_분할_체결_테스트() {
-        let mut order = make_base_order(Decimal::new(10, 0));
+        let order = make_base_order(Decimal::new(10, 0));
 
-        let result = order.fill(Decimal::new(4, 0), Decimal::new(400, 0));
-        assert_eq!(result, Ok(()));
+        let order = order
+            .fill(Decimal::new(4, 0), Decimal::new(400, 0))
+            .unwrap();
         assert_eq!(order.executed_base_qty, Decimal::new(4, 0));
         assert_eq!(order.executed_quote_qty, Decimal::new(400, 0));
         assert_eq!(order.status, OrderStatus::PartiallyFilled);
 
-        let result = order.fill(Decimal::new(6, 0), Decimal::new(600, 0));
-        assert_eq!(result, Ok(()));
+        let order = order
+            .fill(Decimal::new(6, 0), Decimal::new(600, 0))
+            .unwrap();
         assert_eq!(order.executed_base_qty, Decimal::new(10, 0));
         assert_eq!(order.executed_quote_qty, Decimal::new(1000, 0));
         assert_eq!(order.status, OrderStatus::Filled);
@@ -196,31 +202,33 @@ mod tests {
 
     #[test]
     fn quote_주문_분할_체결_테스트() {
-        let mut order = make_quote_order(Decimal::new(1000, 0));
+        let order = make_quote_order(Decimal::new(1000, 0));
 
-        let result = order.fill(Decimal::new(4, 0), Decimal::new(400, 0));
-        assert_eq!(result, Ok(()));
+        let order = order
+            .fill(Decimal::new(4, 0), Decimal::new(400, 0))
+            .unwrap();
         assert_eq!(order.executed_quote_qty, Decimal::new(400, 0));
         assert_eq!(order.status, OrderStatus::PartiallyFilled);
 
-        let result = order.fill(Decimal::new(6, 0), Decimal::new(600, 0));
-        assert_eq!(result, Ok(()));
+        let order = order
+            .fill(Decimal::new(6, 0), Decimal::new(600, 0))
+            .unwrap();
         assert_eq!(order.executed_quote_qty, Decimal::new(1000, 0));
         assert_eq!(order.status, OrderStatus::Filled);
     }
 
     #[test]
     fn base_주문_초과_체결_테스트() {
-        let mut order = make_base_order(Decimal::new(10, 0));
+        let order = make_base_order(Decimal::new(10, 0));
         let result = order.fill(Decimal::new(11, 0), Decimal::new(1100, 0));
-        assert_eq!(result, Err(OrderError::OverFilled));
+        assert!(matches!(result, Err(OrderError::OverFilled)));
     }
 
     #[test]
     fn quote_주문_초과_체결_테스트() {
-        let mut order = make_quote_order(Decimal::new(1000, 0));
+        let order = make_quote_order(Decimal::new(1000, 0));
         let result = order.fill(Decimal::new(11, 0), Decimal::new(1100, 0));
-        assert_eq!(result, Err(OrderError::OverFilled));
+        assert!(matches!(result, Err(OrderError::OverFilled)));
     }
 
     #[test]
@@ -232,8 +240,10 @@ mod tests {
 
     #[test]
     fn 부분체결_주문_취소_테스트() {
-        let mut order = make_base_order(Decimal::new(10, 0));
-        order.fill(Decimal::new(4, 0), Decimal::new(400, 0)).unwrap();
+        let order = make_base_order(Decimal::new(10, 0));
+        let mut order = order
+            .fill(Decimal::new(4, 0), Decimal::new(400, 0))
+            .unwrap();
         assert_eq!(order.status, OrderStatus::PartiallyFilled);
         assert_eq!(order.cancel(), Ok(()));
         assert_eq!(order.status, OrderStatus::Canceled);
@@ -248,8 +258,10 @@ mod tests {
 
     #[test]
     fn 완전체결_주문_취소_테스트() {
-        let mut order = make_base_order(Decimal::new(10, 0));
-        order.fill(Decimal::new(10, 0), Decimal::new(1000, 0)).unwrap();
+        let order = make_base_order(Decimal::new(10, 0));
+        let mut order = order
+            .fill(Decimal::new(10, 0), Decimal::new(1000, 0))
+            .unwrap();
         assert_eq!(order.status, OrderStatus::Filled);
         assert_eq!(order.cancel(), Err(OrderError::AlreadyCompleted));
     }
