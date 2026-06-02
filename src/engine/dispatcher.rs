@@ -86,3 +86,46 @@ impl EngineDispatcher {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SYMBOL: &str = "BTCUSDT";
+
+    fn make_dispatcher() -> EngineDispatcher {
+        let (result_tx, _) = crossbeam::channel::unbounded();
+        EngineDispatcher::new(vec![SYMBOL.to_string()], result_tx)
+    }
+
+    fn make_cmd() -> EngineCommand {
+        EngineCommand::Cancel(Uuid::now_v7())
+    }
+
+    #[test]
+    fn 중복_심볼_무시_테스트() {
+        let (tx, _) = crossbeam::channel::unbounded();
+        let dispatcher = EngineDispatcher::new(vec![SYMBOL.to_string(), SYMBOL.to_string()], tx);
+        assert_eq!(dispatcher.senders.len(), 1);
+        assert_eq!(dispatcher.handles.len(), 1);
+    }
+
+    #[test]
+    fn 정상_dispatch_테스트() {
+        let dispatcher = make_dispatcher();
+        assert!(dispatcher.dispatch(SYMBOL, make_cmd()).is_ok());
+    }
+
+    #[test]
+    fn 미등록_심볼_dispatch_테스트() {
+        let dispatcher = make_dispatcher();
+        let result = dispatcher.dispatch("ETHUSDT", make_cmd());
+        assert!(matches!(result, Err(DispatchError::UnknownSymbol { .. })));
+    }
+
+    #[test]
+    fn shutdown_정상_종료_테스트() {
+        let dispatcher = make_dispatcher();
+        dispatcher.shutdown();
+    }
+}
