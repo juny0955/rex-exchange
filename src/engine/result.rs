@@ -111,4 +111,5 @@ pub enum CancelRejectedReason {
 #[derive(Debug, Clone)]
 pub enum AmendRejectedReason {
     OrderNotFound,
+    AmendNotAllowed,
 }

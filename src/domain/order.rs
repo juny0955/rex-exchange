@@ -123,14 +123,23 @@ impl Order {
         }
 
         let current_price = self.price.ok_or(OrderError::AmendNotAllowed)?;
-        let current_base_qty = match self.size {
-            OrderSize::Base(qty) => qty,
-            OrderSize::Quote(_) => return Err(OrderError::AmendNotAllowed),
+        let Some(current_base_qty) = self.base_qty() else {
+            return Err(OrderError::AmendNotAllowed);
         };
 
         let next_price = new_price.unwrap_or(current_price);
         let next_base_qty = new_base_qty.unwrap_or(current_base_qty);
 
+        if next_price <= Decimal::ZERO || next_base_qty <= Decimal::ZERO {
+            return Err(OrderError::AmendNotAllowed);
+        }
+
+        // 가격, 수량 동일할시 거부
+        if next_price == current_price && next_base_qty == current_base_qty {
+            return Err(OrderError::AmendNotAllowed);
+        }
+
+        // 현재 체결된 수량 보다 작게 정정할 수 없음
         if next_base_qty < self.executed_base_qty {
             return Err(OrderError::AmendQtyBelowExecuted);
         }
@@ -138,7 +147,6 @@ impl Order {
         let mut next = self.clone();
         next.price = Some(next_price);
         next.size = OrderSize::Base(next_base_qty);
-
         next.status = if next.executed_base_qty == Decimal::ZERO {
             OrderStatus::New
         } else if next.is_filled_by_size() {
@@ -149,6 +157,13 @@ impl Order {
         next.updated_at = Utc::now();
 
         Ok(next)
+    }
+
+    pub fn base_qty(&self) -> Option<Decimal> {
+        match self.size {
+            OrderSize::Base(qty) => Some(qty),
+            OrderSize::Quote(_) => None,
+        }
     }
 
     pub fn remaining_base_qty(&self) -> Option<Decimal> {
@@ -323,9 +338,7 @@ mod tests {
         let order = order
             .fill(Decimal::new(4, 0), Decimal::new(400, 0))
             .unwrap();
-        let amended = order
-            .amend(None, Some(Decimal::new(8, 0)))
-            .unwrap();
+        let amended = order.amend(None, Some(Decimal::new(8, 0))).unwrap();
         assert_eq!(amended.size, OrderSize::Base(Decimal::new(8, 0)));
         assert_eq!(amended.status, OrderStatus::PartiallyFilled);
     }
