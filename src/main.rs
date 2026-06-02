@@ -5,7 +5,8 @@ use matching_engine::{
     init::init,
 };
 
-fn main() {
+#[tokio::main]
+async fn main() {
     init();
 
     let (result_tx, result_rx) = crossbeam::channel::bounded::<EngineResult>(1024);
