@@ -1,8 +1,6 @@
-use crate::engine::{
-    command::EngineCommand, matching_engine::MatchingEngine, result::EngineResult,
-};
+use crate::engine::command::EngineCommand;
 use crossbeam::channel::{Sender, TrySendError};
-use std::{collections::HashMap, thread::JoinHandle};
+use std::collections::HashMap;
 use tracing::error;
 use uuid::Uuid;
 
@@ -13,35 +11,14 @@ pub enum DispatchError {
     ChannelFull { symbol: String, order_id: Uuid },
 }
 
+#[derive(Debug, Clone)]
 pub struct EngineDispatcher {
     senders: HashMap<String, Sender<EngineCommand>>,
-    handles: Vec<JoinHandle<()>>,
 }
 
 impl EngineDispatcher {
-    pub fn new(symbols: Vec<String>, result_tx: Sender<EngineResult>) -> Self {
-        let mut senders = HashMap::new();
-        let mut handles = Vec::new();
-
-        for symbol in symbols {
-            if senders.contains_key(&symbol) {
-                error!(symbol = %symbol, "중복 심볼 등록");
-                continue;
-            }
-
-            let (engine_tx, engine_rx) = crossbeam::channel::bounded::<EngineCommand>(1024);
-
-            let sym = symbol.clone();
-            let res_tx = result_tx.clone();
-            let handle = std::thread::spawn(move || {
-                MatchingEngine::new(sym, engine_rx, res_tx).run();
-            });
-
-            handles.push(handle);
-            senders.insert(symbol, engine_tx);
-        }
-
-        Self { senders, handles }
+    pub(crate) fn new(senders: HashMap<String, Sender<EngineCommand>>) -> Self {
+        Self { senders }
     }
 
     pub fn dispatch(&self, symbol: &str, cmd: EngineCommand) -> Result<(), DispatchError> {
@@ -75,27 +52,24 @@ impl EngineDispatcher {
 
         Ok(())
     }
-
-    pub fn shutdown(self) {
-        drop(self.senders);
-
-        for handle in self.handles {
-            if let Err(e) = handle.join() {
-                error!(?e, "매칭엔진 종료 중 오류발생");
-            }
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
+    use crossbeam::channel::Receiver;
+
     use super::*;
 
     const SYMBOL: &str = "BTCUSDT";
 
-    fn make_dispatcher() -> EngineDispatcher {
-        let (result_tx, _) = crossbeam::channel::unbounded();
-        EngineDispatcher::new(vec![SYMBOL.to_string()], result_tx)
+    fn make_dispatcher_with_receiver(
+        capacity: usize,
+    ) -> (EngineDispatcher, Receiver<EngineCommand>) {
+        let (engine_tx, engine_rx) = crossbeam::channel::bounded(capacity);
+        let mut senders = HashMap::new();
+        senders.insert(SYMBOL.to_string(), engine_tx);
+
+        (EngineDispatcher::new(senders), engine_rx)
     }
 
     fn make_cmd() -> EngineCommand {
@@ -103,29 +77,40 @@ mod tests {
     }
 
     #[test]
-    fn 중복_심볼_무시_테스트() {
-        let (tx, _) = crossbeam::channel::unbounded();
-        let dispatcher = EngineDispatcher::new(vec![SYMBOL.to_string(), SYMBOL.to_string()], tx);
-        assert_eq!(dispatcher.senders.len(), 1);
-        assert_eq!(dispatcher.handles.len(), 1);
+    fn 정상_dispatch_테스트() {
+        let (dispatcher, engine_rx) = make_dispatcher_with_receiver(1);
+
+        let cmd = make_cmd();
+        let order_id = cmd.order_id();
+        assert!(dispatcher.dispatch(SYMBOL, cmd).is_ok());
+
+        let received = engine_rx.try_recv().expect("dispatch된 command 수신 실패");
+        assert_eq!(received.order_id(), order_id);
     }
 
     #[test]
-    fn 정상_dispatch_테스트() {
-        let dispatcher = make_dispatcher();
-        assert!(dispatcher.dispatch(SYMBOL, make_cmd()).is_ok());
+    fn rx_channel_닫힌_후_dispatch_테스트() {
+        let (dispatcher, engine_rx) = make_dispatcher_with_receiver(1);
+        drop(engine_rx);
+
+        let result = dispatcher.dispatch(SYMBOL, make_cmd());
+
+        assert!(matches!(result, Err(DispatchError::EngineStopped { .. })));
+    }
+
+    #[test]
+    fn channel_full_dispatch_테스트() {
+        let (dispatcher, _engine_rx) = make_dispatcher_with_receiver(0);
+
+        let result = dispatcher.dispatch(SYMBOL, make_cmd());
+
+        assert!(matches!(result, Err(DispatchError::ChannelFull { .. })));
     }
 
     #[test]
     fn 미등록_심볼_dispatch_테스트() {
-        let dispatcher = make_dispatcher();
+        let (dispatcher, _) = make_dispatcher_with_receiver(1);
         let result = dispatcher.dispatch("ETHUSDT", make_cmd());
         assert!(matches!(result, Err(DispatchError::UnknownSymbol { .. })));
-    }
-
-    #[test]
-    fn shutdown_정상_종료_테스트() {
-        let dispatcher = make_dispatcher();
-        dispatcher.shutdown();
     }
 }

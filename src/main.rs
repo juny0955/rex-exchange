@@ -1,9 +1,7 @@
 use std::net::SocketAddr;
 
 use matching_engine::{
-    engine::{
-        dispatcher::EngineDispatcher, result::EngineResult, result_handler::EngineResultHandler,
-    },
+    engine::runtime::EngineRuntime,
     grpc::{
         engine::matching_engine_service_server::MatchingEngineServiceServer,
         matching_engine_grpc::MatchingEngineGrpcService,
@@ -11,31 +9,31 @@ use matching_engine::{
     init::init,
 };
 use tonic::transport::Server;
-use tracing::info;
+use tracing::{error, info};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init();
 
-    let (result_tx, result_rx) = crossbeam::channel::bounded::<EngineResult>(1024);
-
     let symbols = vec!["BTCUSDT".to_string()];
-    let engine_dispatcher = EngineDispatcher::new(symbols, result_tx);
+    let runtime = EngineRuntime::new(symbols);
 
-    std::thread::spawn(move || {
-        EngineResultHandler::new(result_rx).run();
-    });
-
-    let grpc_service = MatchingEngineGrpcService::new(engine_dispatcher);
+    let grpc_service = MatchingEngineGrpcService::new(runtime.dispatcher());
 
     let addr: SocketAddr = "0.0.0.0:50051".parse()?;
 
     info!("gRPC server 시작");
 
-    Server::builder()
+    let server_result = Server::builder()
         .add_service(MatchingEngineServiceServer::new(grpc_service))
-        .serve(addr)
-        .await?;
+        .serve_with_shutdown(addr, async {
+            if let Err(e) = tokio::signal::ctrl_c().await {
+                error!(?e, "종료 시그널 수신 오류");
+            }
+        })
+        .await;
 
+    runtime.shutdown();
+    server_result?;
     Ok(())
 }
