@@ -2,6 +2,7 @@
 name = "matching-engine"
 version = "0.1.0"
 edition = "2024"
+autobenches = false
 
 [features]
 bench-internals = []
@@ -32,5 +33,10 @@ criterion = "0.8.2"
 
 [[bench]]
 name = "orderbook"
+harness = false
+required-features = ["bench-internals"]
+
+[[bench]]
+name = "matching-engine"
 harness = false
 required-features = ["bench-internals"]

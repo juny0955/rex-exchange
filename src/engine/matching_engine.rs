@@ -18,6 +18,9 @@ use crate::{
     },
 };
 
+#[cfg(feature = "bench-internals")]
+mod bench;
+
 struct MatchResult {
     taker: Order,
     trades: Vec<TradeResult>,
