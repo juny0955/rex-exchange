@@ -1,16 +1,15 @@
-use std::{hint::black_box, time::SystemTime};
+use std::hint::black_box;
 
-use chrono::{DateTime, Utc};
 use criterion::{BatchSize, BenchmarkId, Criterion, criterion_group, criterion_main};
 use matching_engine::{
-    domain::order::{Order, OrderSize, OrderStatus, OrderType, Side, TimeInForce},
+    domain::order::{Order, Side, TimeInForce},
     engine::orderbook::OrderBook,
 };
-use rust_decimal::Decimal;
-use uuid::Uuid;
 
-const SYMBOL: &str = "BTCUSDT";
-const PRICE_LEVELS: u128 = 50;
+mod bench_support;
+
+use bench_support::{decimal, limit_order, price_for};
+
 const INPUT_SIZES: [usize; 3] = [100, 1_000, 10_000];
 
 #[derive(Clone, Copy)]
@@ -40,35 +39,6 @@ impl RemovalPosition {
     }
 }
 
-fn fixed_time() -> DateTime<Utc> {
-    SystemTime::UNIX_EPOCH.into()
-}
-
-fn decimal(value: i64) -> Decimal {
-    Decimal::new(value, 0)
-}
-
-fn price_for(index: u128, base_price: i64) -> Decimal {
-    decimal(base_price + (index % PRICE_LEVELS) as i64)
-}
-
-fn limit_order(side: Side, order_id: u128, price: Decimal, qty: Decimal) -> Order {
-    Order {
-        order_id: Uuid::from_u128(order_id),
-        symbol: SYMBOL.to_string(),
-        side,
-        order_type: OrderType::Limit,
-        tif: TimeInForce::GTC,
-        price: Some(price),
-        size: OrderSize::Base(qty),
-        executed_base_qty: Decimal::ZERO,
-        executed_quote_qty: Decimal::ZERO,
-        status: OrderStatus::New,
-        created_at: fixed_time(),
-        updated_at: fixed_time(),
-    }
-}
-
 fn ask_orders(count: usize) -> Vec<Order> {
     (0..count)
         .map(|index| {
@@ -76,8 +46,9 @@ fn ask_orders(count: usize) -> Vec<Order> {
             limit_order(
                 Side::Sell,
                 order_id,
-                price_for(index as u128, 100),
-                decimal(1),
+                TimeInForce::GTC,
+                price_for(index, 100),
+                1,
             )
         })
         .collect()
@@ -90,8 +61,9 @@ fn bid_orders(count: usize) -> Vec<Order> {
             limit_order(
                 Side::Buy,
                 order_id,
-                price_for(index as u128, 90),
-                decimal(1),
+                TimeInForce::GTC,
+                price_for(index, 90),
+                1,
             )
         })
         .collect()
@@ -101,7 +73,7 @@ fn same_price_ask_orders(count: usize) -> Vec<Order> {
     (0..count)
         .map(|index| {
             let order_id = 2_000_000_u128 + index as u128;
-            limit_order(Side::Sell, order_id, decimal(100), decimal(1))
+            limit_order(Side::Sell, order_id, TimeInForce::GTC, 100, 1)
         })
         .collect()
 }

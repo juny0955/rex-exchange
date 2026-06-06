@@ -1,5 +1,6 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 
+mod bench_support;
 mod matching_engine_bench;
 
 fn bench_place_order(c: &mut Criterion) {
