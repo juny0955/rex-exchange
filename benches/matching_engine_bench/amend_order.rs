@@ -1,3 +1,7 @@
+//! `MatchingEngine::amend_order` 내부 경로를 측정한다.
+//!
+//! 정정은 가격/수량 변화에 따라 우선순위 유지와 cancel-replace로 나뉘므로 두 경로를 분리한다.
+
 use std::hint::black_box;
 
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
@@ -13,6 +17,7 @@ pub fn bench(c: &mut Criterion) {
     for count in INPUT_SIZES {
         group.throughput(Throughput::Elements(count as u64));
 
+        // 가격은 유지하고 수량만 줄여 book index 안의 주문을 in-place로 갱신하는 경로.
         group.bench_with_input(
             BenchmarkId::new("decrease_qty_in_place", count),
             &count,
@@ -36,6 +41,7 @@ pub fn bench(c: &mut Criterion) {
             },
         );
 
+        // 가격 변경으로 기존 주문을 취소하고 새 주문으로 재등록해 우선순위를 잃는 경로.
         group.bench_with_input(
             BenchmarkId::new("price_change_cancel_replace", count),
             &count,

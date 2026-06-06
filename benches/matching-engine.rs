@@ -1,3 +1,8 @@
+//! `MatchingEngine` 내부 주문 처리 경로를 측정하는 Criterion entrypoint.
+//!
+//! 채널, 스레드, gRPC 비용은 제외하고 `bench-internals` feature로 열린 내부 API만 호출한다.
+//! 실제 scenario별 측정 로직은 `matching_engine_bench` 하위 모듈에 둔다.
+
 use criterion::{Criterion, criterion_group, criterion_main};
 
 mod bench_support;

@@ -1,3 +1,7 @@
+//! 같은 price level 안에서 주문을 제거하는 비용을 측정한다.
+//!
+//! `remove_order`는 현재 queue retain 기반이라 삭제 위치보다 같은 level 주문 수에 더 민감하다.
+
 use std::hint::black_box;
 
 use criterion::{BatchSize, BenchmarkId, Criterion};
@@ -47,6 +51,8 @@ pub fn bench(c: &mut Criterion) {
                     b.iter_batched(
                         || orderbook_with(orders),
                         |mut orderbook| {
+                            // 제거는 book을 mutate하므로 매 iteration마다 동일한 book을 다시 만들고,
+                            // 측정 구간에는 remove_order 하나만 둔다.
                             black_box(orderbook.remove_order(black_box(target_order_id)));
                         },
                         BatchSize::LargeInput,

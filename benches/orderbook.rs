@@ -1,3 +1,8 @@
+//! `OrderBook` 자료구조 비용을 측정하는 Criterion entrypoint.
+//!
+//! 실제 측정 로직은 `orderbook_bench` 하위 모듈에 나누고, 이 파일은 benchmark group을
+//! Criterion에 등록하는 역할만 맡는다.
+
 use criterion::{Criterion, criterion_group, criterion_main};
 
 mod bench_support;

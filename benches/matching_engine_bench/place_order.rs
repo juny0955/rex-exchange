@@ -1,3 +1,8 @@
+//! `MatchingEngine::place_order` 내부 경로를 scenario별로 측정한다.
+//!
+//! 모든 case는 엔진 상태를 mutate하므로 `iter_batched`로 매 iteration마다 같은 fixture를
+//! 다시 만들고, 측정 closure에는 place 호출만 남긴다.
+
 use std::hint::black_box;
 
 use criterion::{BatchSize, BenchmarkId, Criterion, Throughput};
@@ -14,6 +19,7 @@ pub fn bench(c: &mut Criterion) {
     for count in INPUT_SIZES {
         group.throughput(Throughput::Elements(count as u64));
 
+        // 반대편 ask가 있어도 taker limit price가 낮아 매칭 없이 GTC로 book에 resting 되는 경로.
         group.bench_with_input(
             BenchmarkId::new("resting_limit_no_cross", count),
             &count,
@@ -39,6 +45,7 @@ pub fn bench(c: &mut Criterion) {
             },
         );
 
+        // 같은 가격의 maker N개를 taker 하나가 모두 체결해 trade/result 생성 비용까지 포함한다.
         group.bench_with_input(
             BenchmarkId::new("full_fill_same_level", count),
             &count,
@@ -64,6 +71,7 @@ pub fn bench(c: &mut Criterion) {
             },
         );
 
+        // Quote size Market Buy가 ask ladder를 sweep하며 가격 level과 잔여 quote를 갱신하는 경로.
         group.bench_with_input(
             BenchmarkId::new("market_quote_sweep", count),
             &count,
@@ -86,6 +94,7 @@ pub fn bench(c: &mut Criterion) {
             },
         );
 
+        // FOK 주문이 실제 체결에 들어가기 전 유동성 검증에서 취소되는 사전 검사 경로.
         group.bench_with_input(
             BenchmarkId::new("fok_reject_insufficient_liquidity", count),
             &count,
