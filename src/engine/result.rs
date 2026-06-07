@@ -53,7 +53,7 @@ pub enum CancelOrderOutcome {
 pub enum AmendOrderOutcome {
     Amended(OrderSnapshot),
     CancelReplaced {
-        canceled: OrderSnapshot,
+        cancelled: OrderSnapshot,
         placed: PlaceOrderResult,
     },
     Rejected(AmendRejectedReason),

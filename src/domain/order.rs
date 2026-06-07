@@ -28,7 +28,7 @@ pub enum OrderStatus {
     New,
     PartiallyFilled,
     Filled,
-    Canceled,
+    Cancelled,
     Rejected,
     Expired,
 }
@@ -98,14 +98,14 @@ impl Order {
     }
 
     pub fn cancel(&mut self) -> Result<(), OrderError> {
-        if matches!(self.status, OrderStatus::Canceled) {
+        if matches!(self.status, OrderStatus::Cancelled) {
             return Err(OrderError::AlreadyCancelled);
         }
         if self.is_completed() {
             return Err(OrderError::AlreadyCompleted);
         }
 
-        self.status = OrderStatus::Canceled;
+        self.status = OrderStatus::Cancelled;
         self.updated_at = Utc::now();
 
         Ok(())
@@ -290,7 +290,7 @@ mod tests {
     fn new_주문_취소_테스트() {
         let mut order = make_base_order(Decimal::new(10, 0));
         assert_eq!(order.cancel(), Ok(()));
-        assert_eq!(order.status, OrderStatus::Canceled);
+        assert_eq!(order.status, OrderStatus::Cancelled);
     }
 
     #[test]
@@ -301,7 +301,7 @@ mod tests {
             .unwrap();
         assert_eq!(order.status, OrderStatus::PartiallyFilled);
         assert_eq!(order.cancel(), Ok(()));
-        assert_eq!(order.status, OrderStatus::Canceled);
+        assert_eq!(order.status, OrderStatus::Cancelled);
     }
 
     #[test]

@@ -201,7 +201,7 @@ impl MatchingEngine {
                 symbol: self.symbol.clone(),
                 order_id: cmd.order_id,
                 outcome: AmendOrderOutcome::CancelReplaced {
-                    canceled: OrderSnapshot::from(&cancelled),
+                    cancelled: OrderSnapshot::from(&cancelled),
                     placed,
                 },
             });
@@ -617,7 +617,7 @@ mod tests {
             panic!("취소 성공이어야 함");
         };
         assert_eq!(snapshot.order_id, order_id);
-        assert_eq!(snapshot.status, OrderStatus::Canceled);
+        assert_eq!(snapshot.status, OrderStatus::Cancelled);
         assert_eq!(snapshot.executed_base_qty, Decimal::ZERO);
         assert_eq!(snapshot.remaining_base_qty, Some(Decimal::new(10, 0)));
         assert!(engine.orderbook.get_best_opposite(&Side::Sell).is_none());
@@ -642,7 +642,7 @@ mod tests {
         let CancelOrderOutcome::Cancelled(snapshot) = r.outcome else {
             panic!("취소 성공이어야 함");
         };
-        assert_eq!(snapshot.status, OrderStatus::Canceled);
+        assert_eq!(snapshot.status, OrderStatus::Cancelled);
         assert_eq!(snapshot.executed_base_qty, Decimal::new(5, 0));
         assert_eq!(snapshot.remaining_base_qty, Some(Decimal::new(5, 0)));
         assert!(engine.orderbook.get_best_opposite(&Side::Sell).is_none());
