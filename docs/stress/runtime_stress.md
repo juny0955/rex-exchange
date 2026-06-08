@@ -12,6 +12,18 @@ EngineDispatcher -> symbol별 engine thread -> result channel -> EngineResultHan
 
 gRPC와 Kafka는 포함하지 않는다. Kafka 지연은 `--publisher-delay-ms` 옵션으로 흉내낸다.
 
+## 테스트 모드
+
+`runtime_stress`는 두 가지 모드를 지원한다.
+
+| 모드 | 활성 조건 | 용도 |
+| --- | --- | --- |
+| paced load | `--duration-sec`와 `--target-commands-per-sec` 지정 | k6처럼 warm-up 후 일정 시간 동안 목표 command 유입률을 유지하는 부하 테스트 |
+| burst stress | `--duration-sec` 미지정. `--orders` 사용 | command를 가능한 빨리 밀어 넣어 채널 포화점과 순간 burst 취약성을 확인하는 스트레스 테스트 |
+
+운영 부하에 가까운 결과가 필요하면 paced load 모드를 먼저 사용한다.
+기존 `--orders` 방식은 순간 burst를 만들기 때문에 `채널 포화`가 쉽게 발생할 수 있으며, 이를 일반 부하 테스트 결과로 해석하면 안 된다.
+
 ## 빌드
 
 측정 전 release binary를 먼저 빌드한다.
@@ -24,11 +36,11 @@ cargo build --release --bin runtime_stress
 Windows는 `.exe` 파일을, macOS/Linux는 확장자 없는 binary를 실행한다.
 
 ```powershell
-.\target\release\runtime_stress.exe --orders 10 --sweep-depth 3 --timeout-sec 5
+.\target\release\runtime_stress.exe --duration-sec 1 --target-commands-per-sec 100 --sweep-depth 3 --timeout-sec 5
 ```
 
 ```bash
-./target/release/runtime_stress --orders 10 --sweep-depth 3 --timeout-sec 5
+./target/release/runtime_stress --duration-sec 1 --target-commands-per-sec 100 --sweep-depth 3 --timeout-sec 5
 ```
 
 ## 옵션
@@ -36,27 +48,36 @@ Windows는 `.exe` 파일을, macOS/Linux는 확장자 없는 binary를 실행한
 | 옵션 | 기본값 | 의미 |
 | --- | ---: | --- |
 | `--scenario` | `full-fill-same-level` | 실행할 부하 시나리오 |
-| `--orders` | `100000` | 워크로드 반복 수 |
+| `--orders` | `100000` | burst stress 모드의 워크로드 반복 수 |
+| `--duration-sec` | 없음 | paced load 모드의 측정 시간. 지정하면 `--orders`와 함께 사용할 수 없다 |
+| `--warmup-sec` | `0` | paced load 모드에서 측정 전 warm-up 시간 |
+| `--target-commands-per-sec` | 없음 | paced load 모드의 목표 command 유입률. `--duration-sec` 사용 시 필수 |
 | `--symbols` | `1` | 생성할 심볼 수. 심볼별 engine thread가 생성된다 |
 | `--sweep-depth` | `10` | 체결 시나리오에서 taker 1개가 sweep할 maker 주문 수 |
 | `--publisher-delay-ms` | `0` | 결과 발행마다 추가할 지연 시간(ms) |
 | `--timeout-sec` | `30` | 접수된 명령의 결과 발행 완료를 기다릴 최대 시간 |
 
+안전한 수동 실행을 위해 입력값에는 상한이 있다. `--orders`는 10,000,000 이하, `--symbols`는 1,024 이하,
+`--sweep-depth`는 10,000 이하, `--duration-sec`, `--warmup-sec`, `--timeout-sec`는 86,400초 이하,
+`--publisher-delay-ms`는 60,000ms 이하, `--target-commands-per-sec`는 1,000,000 이하로 제한한다.
+
+`--target-commands-per-sec`는 workload 반복 수가 아니라 실제 `EngineCommand` 유입률이다.
+예를 들어 `full-fill-same-level`에서 `--sweep-depth 10`이면 workload 1회는 maker 10개와 taker 1개,
+즉 command 11개를 만든다. paced load 모드는 이 11개를 한 번에 넣지 않고 command 단위로 간격을 둔다.
+
 `--orders`는 command 수가 아니라 워크로드 반복 수다.
 체결 시나리오에서는 한 번 반복할 때 maker 주문 `sweep-depth`개와 taker 주문 1개가 생성된다.
 
-예를 들어 아래 명령은 반복 1,000회, sweep depth 10으로 실행한다.
+실수로 과도한 thread, 메모리, wall-clock 실행을 만들지 않도록 입력값은 아래 상한을 둔다.
 
-```powershell
-.\target\release\runtime_stress.exe --orders 1000 --sweep-depth 10
-```
-
-```bash
-./target/release/runtime_stress --orders 1000 --sweep-depth 10
-```
-
-이 경우 시도한 명령 수는 대략 `1000 * (10 + 1) = 11000`개이고,
-체결 수와 메이커 갱신 수는 정상 완료 기준 각각 `1000 * 10 = 10000`개가 된다.
+| 옵션 | 최대값 |
+| --- | ---: |
+| `--orders` | `10,000,000` |
+| `--symbols` | `1,024` |
+| `--sweep-depth` | `10,000` |
+| `--duration-sec`, `--warmup-sec`, `--timeout-sec` | `86,400` |
+| `--publisher-delay-ms` | `60,000` |
+| `--target-commands-per-sec` | `1,000,000` |
 
 ## 시나리오
 
@@ -73,101 +94,116 @@ Windows는 `.exe` 파일을, macOS/Linux는 확장자 없는 binary를 실행한
 
 ## 추천 실행 순서
 
-1. 작은 입력으로 정상 동작을 확인한다.
+1. 작은 입력으로 paced load 모드가 정상 동작하는지 확인한다.
 
 ```powershell
-.\target\release\runtime_stress.exe --orders 10 --sweep-depth 3 --timeout-sec 5
+.\target\release\runtime_stress.exe --duration-sec 1 --target-commands-per-sec 100 --sweep-depth 3 --timeout-sec 5
 ```
 
 ```bash
-./target/release/runtime_stress --orders 10 --sweep-depth 3 --timeout-sec 5
+./target/release/runtime_stress --duration-sec 1 --target-commands-per-sec 100 --sweep-depth 3 --timeout-sec 5
 ```
 
-2. 기본 체결 부하를 점진적으로 올린다.
+2. warm-up을 둔 기본 부하 테스트를 실행한다.
 
 ```powershell
-.\target\release\runtime_stress.exe --orders 1000 --sweep-depth 10 --timeout-sec 30
-.\target\release\runtime_stress.exe --orders 10000 --sweep-depth 10 --timeout-sec 30
-.\target\release\runtime_stress.exe --orders 100000 --sweep-depth 10 --timeout-sec 60
+.\target\release\runtime_stress.exe --scenario full-fill-same-level --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
+.\target\release\runtime_stress.exe --scenario full-fill-same-level --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 5000 --sweep-depth 10 --timeout-sec 30
 ```
 
 ```bash
-./target/release/runtime_stress --orders 1000 --sweep-depth 10 --timeout-sec 30
-./target/release/runtime_stress --orders 10000 --sweep-depth 10 --timeout-sec 30
-./target/release/runtime_stress --orders 100000 --sweep-depth 10 --timeout-sec 60
+./target/release/runtime_stress --scenario full-fill-same-level --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
+./target/release/runtime_stress --scenario full-fill-same-level --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 5000 --sweep-depth 10 --timeout-sec 30
 ```
 
-3. 체결 시나리오별로 비교한다.
+3. 체결 시나리오별로 같은 command 유입률에서 비교한다.
 
 ```powershell
-.\target\release\runtime_stress.exe --scenario full-fill-same-level --orders 10000 --sweep-depth 10 --timeout-sec 30
-.\target\release\runtime_stress.exe --scenario market-quote-sweep --orders 10000 --sweep-depth 10 --timeout-sec 30
-.\target\release\runtime_stress.exe --scenario partial-fill-rest --orders 10000 --sweep-depth 10 --timeout-sec 30
+.\target\release\runtime_stress.exe --scenario full-fill-same-level --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
+.\target\release\runtime_stress.exe --scenario market-quote-sweep --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
+.\target\release\runtime_stress.exe --scenario partial-fill-rest --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
 ```
 
 ```bash
-./target/release/runtime_stress --scenario full-fill-same-level --orders 10000 --sweep-depth 10 --timeout-sec 30
-./target/release/runtime_stress --scenario market-quote-sweep --orders 10000 --sweep-depth 10 --timeout-sec 30
-./target/release/runtime_stress --scenario partial-fill-rest --orders 10000 --sweep-depth 10 --timeout-sec 30
+./target/release/runtime_stress --scenario full-fill-same-level --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
+./target/release/runtime_stress --scenario market-quote-sweep --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
+./target/release/runtime_stress --scenario partial-fill-rest --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
 ```
 
 4. 심볼 수를 늘려 확장성을 확인한다.
 
 ```powershell
-.\target\release\runtime_stress.exe --orders 10000 --symbols 1 --sweep-depth 10 --timeout-sec 30
-.\target\release\runtime_stress.exe --orders 10000 --symbols 2 --sweep-depth 10 --timeout-sec 30
-.\target\release\runtime_stress.exe --orders 10000 --symbols 4 --sweep-depth 10 --timeout-sec 30
+.\target\release\runtime_stress.exe --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --symbols 1 --sweep-depth 10 --timeout-sec 30
+.\target\release\runtime_stress.exe --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --symbols 2 --sweep-depth 10 --timeout-sec 30
+.\target\release\runtime_stress.exe --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --symbols 4 --sweep-depth 10 --timeout-sec 30
 ```
 
 ```bash
-./target/release/runtime_stress --orders 10000 --symbols 1 --sweep-depth 10 --timeout-sec 30
-./target/release/runtime_stress --orders 10000 --symbols 2 --sweep-depth 10 --timeout-sec 30
-./target/release/runtime_stress --orders 10000 --symbols 4 --sweep-depth 10 --timeout-sec 30
+./target/release/runtime_stress --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --symbols 1 --sweep-depth 10 --timeout-sec 30
+./target/release/runtime_stress --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --symbols 2 --sweep-depth 10 --timeout-sec 30
+./target/release/runtime_stress --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --symbols 4 --sweep-depth 10 --timeout-sec 30
 ```
 
 5. publisher 지연을 넣어 결과 발행 병목을 확인한다.
 
 ```powershell
-.\target\release\runtime_stress.exe --orders 1000 --sweep-depth 10 --publisher-delay-ms 1 --timeout-sec 30
-.\target\release\runtime_stress.exe --orders 1000 --sweep-depth 10 --publisher-delay-ms 5 --timeout-sec 30
+.\target\release\runtime_stress.exe --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --publisher-delay-ms 1 --timeout-sec 30
+.\target\release\runtime_stress.exe --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --publisher-delay-ms 5 --timeout-sec 30
 ```
 
 ```bash
-./target/release/runtime_stress --orders 1000 --sweep-depth 10 --publisher-delay-ms 1 --timeout-sec 30
-./target/release/runtime_stress --orders 1000 --sweep-depth 10 --publisher-delay-ms 5 --timeout-sec 30
+./target/release/runtime_stress --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --publisher-delay-ms 1 --timeout-sec 30
+./target/release/runtime_stress --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --publisher-delay-ms 5 --timeout-sec 30
 ```
+
+6. 순간 burst 한계를 보고 싶을 때만 기존 `--orders` 모드를 사용한다.
+
+```powershell
+.\target\release\runtime_stress.exe --orders 1000 --sweep-depth 10 --timeout-sec 30
+```
+
+```bash
+./target/release/runtime_stress --orders 1000 --sweep-depth 10 --timeout-sec 30
+```
+
+이 명령은 11,000개 command를 가능한 빨리 단일 심볼 큐에 넣는다. `채널 포화`가 높게 나오는 것은 burst stress 결과로 해석한다.
 
 ## 결과 해석
 
 | 출력 항목 | 해석 |
 | --- | --- |
+| `목표 명령 수/s` | paced load 모드에서 의도한 `EngineCommand` 유입률 |
+| `실제 시도 수/s` | 측정 구간에서 실제로 dispatch를 시도한 command/sec |
 | `접수 성공` | dispatcher가 engine channel에 넣는 데 성공한 명령 수 |
 | `채널 포화` | engine command channel이 가득 차서 거부된 명령 수 |
 | `발행 결과` | result handler가 publisher까지 전달한 결과 수 |
 | `완료 여부` | 제한 시간 안에 접수된 모든 명령의 결과가 발행됐는지 여부 |
 | `체결 수` | 발행된 `Place` 결과에 포함된 trade 수 합계 |
 | `메이커 갱신 수` | 발행된 `Place` 결과에 포함된 maker snapshot 수 합계 |
+| `pacing 지연 횟수` | 목표 command 간격보다 dispatch 루프가 늦어진 횟수 |
 | `초당 접수 성공 수` | dispatch loop 기준 처리량 |
 | `초당 발행 결과 수` | result handler와 publisher까지 포함한 처리량 |
 
 주요 해석 기준은 아래와 같다.
 
-- `채널 포화`가 증가하면 dispatcher가 engine thread 소비 속도보다 빠르게 명령을 밀어 넣고 있다.
+- paced load 모드에서 `채널 포화`가 0이면 목표 유입률은 현재 런타임이 수용 가능한 범위다.
+- paced load 모드에서 `채널 포화`가 증가하면 목표 command/sec가 engine thread 소비 속도보다 높을 가능성이 있다.
 - `접수 성공`은 높은데 `발행 결과`가 늦거나 `완료 여부`가 `아니오`면 result handler 또는 publisher 경로가 병목일 수 있다.
 - `--symbols`를 늘려도 `초당 발행 결과 수`가 거의 늘지 않으면 단일 result handler나 공통 result channel을 의심한다.
 - `--publisher-delay-ms`를 조금만 올려도 전체 완료가 밀리면 실제 Kafka publish 지연에 취약할 가능성이 있다.
 - `체결 수`와 `메이커 갱신 수`가 큰 시나리오에서만 급격히 느려지면 trade/result payload 생성 비용을 본다.
+- burst stress 모드에서 높은 `채널 포화`는 순간 유입량 한계를 의미한다. 이를 운영 부하 처리량 부족으로 바로 해석하지 않는다.
 
 ## 보조 진단
 
 런타임 처리 경로의 순수 처리량만 확인하고 싶을 때는 `cancel-missing`을 사용한다.
 
 ```powershell
-.\target\release\runtime_stress.exe --scenario cancel-missing --orders 100000 --timeout-sec 30
+.\target\release\runtime_stress.exe --scenario cancel-missing --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 10000 --timeout-sec 30
 ```
 
 ```bash
-./target/release/runtime_stress --scenario cancel-missing --orders 100000 --timeout-sec 30
+./target/release/runtime_stress --scenario cancel-missing --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 10000 --timeout-sec 30
 ```
 
 이 시나리오는 존재하지 않는 주문 취소를 반복하므로 실제 체결, maker 갱신, orderbook sweep 비용을 만들지 않는다.
