@@ -9,12 +9,16 @@ bench-internals = []
 
 [dependencies]
 # Runtime
-tokio = { version = "1.52.3", features = ["rt-multi-thread", "macros", "signal"] }
+tokio = { version = "1.52.3", features = [
+    "rt-multi-thread",
+    "macros",
+    "signal",
+] }
 
 # gRPC
 tonic = { version = "0.14.6", features = ["transport"] }
 tonic-prost = "0.14.6"
-prost = "0.14.3"
+prost = "0.14.4"
 
 rdkafka = { version = "0.39.0", features = ["cmake-build", "tracing"] }
 
