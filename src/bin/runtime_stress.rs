@@ -1,5 +1,7 @@
 use std::{
-    env, process,
+    env,
+    fmt::Write as _,
+    process,
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -58,6 +60,16 @@ impl Scenario {
             Self::FullFillSameLevel => "동일 호가 전량 체결",
             Self::MarketQuoteSweep => "시장가 금액 스윕",
             Self::PartialFillRest => "부분 체결 후 잔존",
+        }
+    }
+
+    fn token(self) -> &'static str {
+        match self {
+            Self::CancelMissing => "cancel-missing",
+            Self::PlaceRestingLimit => "place-resting-limit",
+            Self::FullFillSameLevel => "full-fill-same-level",
+            Self::MarketQuoteSweep => "market-quote-sweep",
+            Self::PartialFillRest => "partial-fill-rest",
         }
     }
 }
@@ -487,40 +499,144 @@ fn print_summary(
     total_elapsed: Duration,
     result_stats: &ResultStatsSnapshot,
 ) {
-    println!("런타임 스트레스 테스트 결과");
-    println!("시나리오: {}", config.scenario.display_name());
-    println!("워크로드 반복 수: {}", config.orders);
-    println!("시도한 명령 수: {attempted_commands}");
-    println!("심볼 수: {}", config.symbols);
-    println!("스윕 깊이: {}", config.sweep_depth);
-    println!("발행 지연(ms): {}", config.publisher_delay.as_millis());
-    println!("제한 시간(초): {}", config.timeout.as_secs());
-    println!("접수 성공: {}", stats.accepted);
-    println!("채널 포화: {}", stats.channel_full);
-    println!("미등록 심볼: {}", stats.unknown_symbol);
-    println!("엔진 중지: {}", stats.engine_stopped);
-    println!("거부 합계: {}", stats.rejected());
-    println!("발행 결과: {}", result_stats.published);
-    println!("주문 접수 결과: {}", result_stats.place_results);
-    println!("주문 취소 결과: {}", result_stats.cancel_results);
-    println!("주문 정정 결과: {}", result_stats.amend_results);
-    println!("체결 수: {}", result_stats.trades);
-    println!("메이커 갱신 수: {}", result_stats.maker_updates);
-    println!("완료 여부: {}", completion_label(completed));
-    println!("접수 소요 시간: {dispatch_elapsed:?}");
-    println!("전체 소요 시간: {total_elapsed:?}");
-    println!(
-        "접수 성공률: {:.2}%",
-        percentage(stats.accepted, attempted_commands)
+    print!(
+        "{}",
+        render_summary(
+            config,
+            stats,
+            attempted_commands,
+            completed,
+            dispatch_elapsed,
+            total_elapsed,
+            result_stats,
+        )
     );
-    println!(
-        "초당 접수 성공 수: {:.2}",
-        per_sec(stats.accepted, dispatch_elapsed)
+}
+
+fn render_summary(
+    config: &Config,
+    stats: &DispatchStats,
+    attempted_commands: usize,
+    completed: bool,
+    dispatch_elapsed: Duration,
+    total_elapsed: Duration,
+    result_stats: &ResultStatsSnapshot,
+) -> String {
+    let mut output = String::new();
+
+    writeln!(output, "================================").unwrap();
+    writeln!(output, "런타임 스트레스 테스트 결과").unwrap();
+    writeln!(output, "================================").unwrap();
+    writeln!(output).unwrap();
+
+    writeln!(output, "[실행 조건]").unwrap();
+    push_row(
+        &mut output,
+        "시나리오",
+        &format!(
+            "{} ({})",
+            config.scenario.display_name(),
+            config.scenario.token()
+        ),
     );
-    println!(
-        "초당 발행 결과 수: {:.2}",
-        per_sec(result_stats.published, total_elapsed)
+    push_row(
+        &mut output,
+        "워크로드 반복 수",
+        &format_count(config.orders),
     );
+    push_row(
+        &mut output,
+        "시도한 명령 수",
+        &format_count(attempted_commands),
+    );
+    push_row(&mut output, "심볼 수", &format_count(config.symbols));
+    push_row(&mut output, "스윕 깊이", &format_count(config.sweep_depth));
+    push_row(
+        &mut output,
+        "발행 지연",
+        &format!("{}ms", config.publisher_delay.as_millis()),
+    );
+    push_row(
+        &mut output,
+        "제한 시간",
+        &format!("{}s", config.timeout.as_secs()),
+    );
+    writeln!(output).unwrap();
+
+    writeln!(output, "[접수 결과]").unwrap();
+    push_row(&mut output, "접수 성공", &format_count(stats.accepted));
+    push_row(&mut output, "채널 포화", &format_count(stats.channel_full));
+    push_row(
+        &mut output,
+        "미등록 심볼",
+        &format_count(stats.unknown_symbol),
+    );
+    push_row(
+        &mut output,
+        "엔진 중지",
+        &format_count(stats.engine_stopped),
+    );
+    push_row(&mut output, "거부 합계", &format_count(stats.rejected()));
+    push_row(
+        &mut output,
+        "접수 성공률",
+        &format!("{:.2}%", percentage(stats.accepted, attempted_commands)),
+    );
+    writeln!(output).unwrap();
+
+    writeln!(output, "[발행 결과]").unwrap();
+    push_row(
+        &mut output,
+        "발행 결과",
+        &format_count(result_stats.published),
+    );
+    push_row(
+        &mut output,
+        "주문 접수 결과",
+        &format_count(result_stats.place_results),
+    );
+    push_row(
+        &mut output,
+        "주문 취소 결과",
+        &format_count(result_stats.cancel_results),
+    );
+    push_row(
+        &mut output,
+        "주문 정정 결과",
+        &format_count(result_stats.amend_results),
+    );
+    push_row(&mut output, "체결 수", &format_count(result_stats.trades));
+    push_row(
+        &mut output,
+        "메이커 갱신 수",
+        &format_count(result_stats.maker_updates),
+    );
+    push_row(&mut output, "완료 여부", completion_label(completed));
+    writeln!(output).unwrap();
+
+    writeln!(output, "[처리량]").unwrap();
+    push_row(
+        &mut output,
+        "접수 소요 시간",
+        &format_duration_display(dispatch_elapsed),
+    );
+    push_row(
+        &mut output,
+        "전체 소요 시간",
+        &format_duration_display(total_elapsed),
+    );
+    push_row(
+        &mut output,
+        "초당 접수 성공 수",
+        &format_rate(per_sec(stats.accepted, dispatch_elapsed)),
+    );
+    push_row(
+        &mut output,
+        "초당 발행 결과 수",
+        &format_rate(per_sec(result_stats.published, total_elapsed)),
+    );
+
+    output
 }
 
 fn percentage(count: usize, total: usize) -> f64 {
@@ -542,6 +658,57 @@ fn per_sec(count: usize, elapsed: Duration) -> f64 {
     }
 
     count as f64 / secs
+}
+
+fn push_row(output: &mut String, label: &str, value: &str) {
+    const LABEL_WIDTH: usize = 19;
+
+    let padding = LABEL_WIDTH.saturating_sub(display_width(label)).max(1);
+    writeln!(output, "  {label}{}{value}", " ".repeat(padding)).unwrap();
+}
+
+fn display_width(value: &str) -> usize {
+    value
+        .chars()
+        .map(|ch| if ch.is_ascii() { 1 } else { 2 })
+        .sum()
+}
+
+fn format_count(value: usize) -> String {
+    let raw = value.to_string();
+    let mut formatted = String::with_capacity(raw.len() + raw.len() / 3);
+
+    for (index, ch) in raw.chars().rev().enumerate() {
+        if index > 0 && index % 3 == 0 {
+            formatted.push(',');
+        }
+        formatted.push(ch);
+    }
+
+    formatted.chars().rev().collect()
+}
+
+fn format_duration_display(duration: Duration) -> String {
+    let secs = duration.as_secs_f64();
+
+    if secs >= 1.0 {
+        format!("{secs:.3}s")
+    } else {
+        format!("{:.3}ms", secs * 1_000.0)
+    }
+}
+
+fn format_rate(value: f64) -> String {
+    let raw = format!("{value:.2}");
+    let Some((whole, fraction)) = raw.split_once('.') else {
+        return format_count(raw.parse().unwrap_or_default());
+    };
+
+    format!(
+        "{}.{}",
+        format_count(whole.parse().unwrap_or_default()),
+        fraction
+    )
 }
 
 fn print_usage() {
@@ -672,6 +839,78 @@ mod tests {
     fn completion_label_returns_korean_label() {
         assert_eq!(completion_label(true), "예");
         assert_eq!(completion_label(false), "아니오");
+    }
+
+    #[test]
+    fn scenario_token_returns_cli_value() {
+        assert_eq!(Scenario::FullFillSameLevel.token(), "full-fill-same-level");
+        assert_eq!(Scenario::CancelMissing.token(), "cancel-missing");
+    }
+
+    #[test]
+    fn format_count_uses_thousands_separator() {
+        assert_eq!(format_count(0), "0");
+        assert_eq!(format_count(1_000), "1,000");
+        assert_eq!(format_count(1_234_567), "1,234,567");
+    }
+
+    #[test]
+    fn format_duration_display_uses_ms_or_seconds() {
+        assert_eq!(
+            format_duration_display(Duration::from_micros(123_456)),
+            "123.456ms"
+        );
+        assert_eq!(
+            format_duration_display(Duration::from_millis(1_234)),
+            "1.234s"
+        );
+    }
+
+    #[test]
+    fn render_summary_groups_results_into_readable_sections() {
+        let config = Config {
+            scenario: Scenario::FullFillSameLevel,
+            orders: 100_000,
+            symbols: 1,
+            sweep_depth: 10,
+            publisher_delay: Duration::ZERO,
+            timeout: Duration::from_secs(30),
+        };
+        let stats = DispatchStats {
+            accepted: 1_100_000,
+            channel_full: 0,
+            unknown_symbol: 0,
+            engine_stopped: 0,
+        };
+        let result_stats = ResultStatsSnapshot {
+            published: 1_100_000,
+            place_results: 1_100_000,
+            cancel_results: 0,
+            amend_results: 0,
+            trades: 1_000_000,
+            maker_updates: 1_000_000,
+        };
+
+        let output = render_summary(
+            &config,
+            &stats,
+            1_100_000,
+            true,
+            Duration::from_micros(123_456),
+            Duration::from_micros(456_789),
+            &result_stats,
+        );
+
+        assert!(output.contains("================================"));
+        assert!(output.contains("[실행 조건]"));
+        assert!(output.contains("[접수 결과]"));
+        assert!(output.contains("[발행 결과]"));
+        assert!(output.contains("[처리량]"));
+        assert!(output.contains("동일 호가 전량 체결 (full-fill-same-level)"));
+        assert!(output.contains("워크로드 반복 수   100,000"));
+        assert!(output.contains("시도한 명령 수     1,100,000"));
+        assert!(output.contains("접수 소요 시간     123.456ms"));
+        assert!(output.contains("초당 접수 성공 수  "));
     }
 
     #[test]
