@@ -7,6 +7,7 @@ use matching_engine::{
         matching_engine_grpc::MatchingEngineGrpcService,
     },
     init::init,
+    kafka::producer::KafkaProducer,
 };
 use tonic::transport::Server;
 use tracing::{error, info};
@@ -16,7 +17,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     init();
 
     let symbols = vec!["BTCUSDT".to_string()];
-    let runtime = EngineRuntime::new(symbols);
+    let kafka_producer = KafkaProducer::new()?;
+    let runtime = EngineRuntime::new(symbols, Box::new(kafka_producer));
 
     let grpc_service = MatchingEngineGrpcService::new(runtime.dispatcher());
 

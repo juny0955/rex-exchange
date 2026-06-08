@@ -3,8 +3,11 @@ use std::{collections::HashMap, thread::JoinHandle};
 use tracing::error;
 
 use crate::engine::{
-    command::EngineCommand, dispatcher::EngineDispatcher, matching_engine::MatchingEngine,
-    result::EngineResult, result_handler::EngineResultHandler,
+    command::EngineCommand,
+    dispatcher::EngineDispatcher,
+    matching_engine::MatchingEngine,
+    result::EngineResult,
+    result_handler::{EngineResultHandler, EngineResultPublisher},
 };
 
 pub struct EngineRuntime {
@@ -14,11 +17,11 @@ pub struct EngineRuntime {
 }
 
 impl EngineRuntime {
-    pub fn new(symbols: Vec<String>) -> Self {
+    pub fn new(symbols: Vec<String>, result_publisher: Box<dyn EngineResultPublisher>) -> Self {
         let (result_tx, result_rx) = crossbeam::channel::bounded::<EngineResult>(1024);
 
         let result_handle = std::thread::spawn(move || {
-            EngineResultHandler::new(result_rx).run();
+            EngineResultHandler::new(result_rx, result_publisher).run();
         });
 
         let mut senders = HashMap::new();
@@ -78,20 +81,32 @@ impl EngineRuntime {
 
 #[cfg(test)]
 mod tests {
+    use crate::engine::result_handler::PublishResult;
+
     use super::*;
+
+    struct NoopPublisher;
+    impl EngineResultPublisher for NoopPublisher {
+        fn publish(&self, _result: &EngineResult) -> PublishResult {
+            Ok(())
+        }
+    }
 
     const SYMBOL: &str = "BTCUSDT";
 
     #[test]
     fn 중복_심볼_무시_테스트() {
-        let runtime = EngineRuntime::new(vec![SYMBOL.to_string(), SYMBOL.to_string()]);
+        let runtime = EngineRuntime::new(
+            vec![SYMBOL.to_string(), SYMBOL.to_string()],
+            Box::new(NoopPublisher),
+        );
         assert_eq!(runtime.engine_handles.len(), 1);
         runtime.shutdown();
     }
 
     #[test]
     fn shutdown_정상_종료_테스트() {
-        let runtime = EngineRuntime::new(vec![SYMBOL.to_string()]);
+        let runtime = EngineRuntime::new(vec![SYMBOL.to_string()], Box::new(NoopPublisher));
         runtime.shutdown();
     }
 }
