@@ -1,5 +1,16 @@
 # Runtime Stress 테스트
 
+관련 문서:
+
+- [Runtime Stress 위키 홈](./README.md)
+- [full-fill-same-level 측정 요약](./scenarios/full-fill-same-level/README.md)
+- [market-quote-sweep 측정 요약](./scenarios/market-quote-sweep/README.md)
+- [partial-fill-rest 측정 요약](./scenarios/partial-fill-rest/README.md)
+- [place-resting-limit 측정 요약](./scenarios/place-resting-limit/README.md)
+- [cancel-resting-order 측정 요약](./scenarios/cancel-resting-order/README.md)
+- [amend-decrease-qty 측정 요약](./scenarios/amend-decrease-qty/README.md)
+- [amend-price-change 측정 요약](./scenarios/amend-price-change/README.md)
+
 `runtime_stress`는 `EngineRuntime` 경로에 부하를 걸어 런타임 병목을 확인하는 수동 실행 도구다.
 Criterion 벤치마크처럼 안정적인 기준선을 만들기 위한 도구가 아니라, 채널 포화, 결과 발행 지연,
 심볼 수 확장성, 체결 결과 payload 증가에 따른 병목을 찾기 위해 사용한다.
@@ -85,14 +96,17 @@ Windows는 `.exe` 파일을, macOS/Linux는 확장자 없는 binary를 실행한
 | --- | --- | --- |
 | `full-fill-same-level` | 동일 호가 전량 체결 | 같은 가격의 maker 주문 N개를 taker 하나가 전량 체결한다. 기본 시나리오다 |
 | `market-quote-sweep` | 시장가 금액 스윕 | 여러 가격대의 ask를 Market Buy Quote 주문이 sweep한다 |
-| `partial-fill-rest` | 부분 체결 후 잔존 | maker N개를 체결한 뒤 taker 잔량이 orderbook에 남는다 |
-| `place-resting-limit` | 미체결 지정가 잔존 | 체결 없이 GTC limit 주문이 orderbook에 쌓인다 |
-| `cancel-resting-order` | 잔존 주문 취소 | 같은 가격에 쌓은 GTC 주문을 다시 취소해 orderbook 삭제 비용을 확인한다 |
-| `amend-decrease-qty` | 수량 감소 정정 | GTC 주문을 넣은 뒤 같은 가격에서 수량만 줄여 in-place 정정 경로를 확인한다 |
-| `amend-price-change` | 가격 변경 정정 | GTC 주문을 넣은 뒤 가격을 바꿔 cancel-replace 정정 경로를 확인한다 |
+| `partial-fill-rest` | 부분 체결 후 잔존 | maker N개를 체결한 뒤 taker 잔량이 orderbook에 남는다. 반복 실행 중 잔존 주문이 누적되는 non-stationary 시나리오다 |
+| `place-resting-limit` | 미체결 지정가 잔존 | 체결 없이 GTC limit 주문이 orderbook에 쌓인다. 반복 실행 중 잔존 주문이 누적되는 non-stationary 시나리오다 |
+| `cancel-resting-order` | 잔존 주문 취소 | 같은 가격에 쌓은 GTC 주문을 다시 취소해 orderbook 삽입/삭제 비용을 확인한다. 반복 종료 시 book을 비우는 stationary 시나리오다 |
+| `amend-decrease-qty` | 수량 감소 정정 | GTC 주문을 넣은 뒤 같은 가격에서 수량만 줄이고 다시 취소해 in-place 정정 비용을 확인한다. 반복 종료 시 book을 비우는 stationary 시나리오다 |
+| `amend-price-change` | 가격 변경 정정 | GTC 주문을 넣은 뒤 가격을 바꾸고 다시 취소해 cancel-replace 정정 비용을 확인한다. 반복 종료 시 book을 비우는 stationary 시나리오다 |
 | `cancel-missing` | 기본 경로 확인(미존재 취소) | 매칭 hot path가 아니라 dispatcher/result handler 기본 경로를 확인하는 보조 진단용이다 |
 
-매칭엔진 부하를 보고 싶다면 `full-fill-same-level`, `market-quote-sweep`, `partial-fill-rest`를 우선 사용한다.
+반복마다 orderbook이 비워지는 체결 hot path를 비교하려면 `full-fill-same-level`, `market-quote-sweep`를 우선 사용한다.
+`partial-fill-rest`는 GTC taker 잔량이 남는 정상 동작을 포함하지만, 반복 실행 중 이전 잔존 주문이 다음 반복과 교차되어 book 상태가 drift한다.
+`place-resting-limit`는 미체결 GTC 주문을 계속 추가하므로 orderbook 크기가 시간에 따라 증가한다.
+따라서 두 시나리오는 stationary 기준선과 직접 비교하지 않고 잔존 주문 누적이 있는 부하 관측 시나리오로 해석한다.
 취소/정정 병목을 보고 싶다면 `cancel-resting-order`, `amend-decrease-qty`, `amend-price-change`를 함께 비교한다.
 `amend-decrease-qty`와 `amend-price-change`는 `--sweep-depth`를 사용하지 않고 workload 1회마다 Place, Amend, Cancel command를 만든다.
 `cancel-missing`은 핵심 스트레스 시나리오가 아니다.
@@ -121,21 +135,33 @@ Windows는 `.exe` 파일을, macOS/Linux는 확장자 없는 binary를 실행한
 ./target/release/runtime_stress --scenario full-fill-same-level --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 5000 --sweep-depth 10 --timeout-sec 30
 ```
 
-3. 체결 시나리오별로 같은 command 유입률에서 비교한다.
+3. 반복마다 orderbook이 비워지는 체결 시나리오를 같은 command 유입률에서 비교한다.
 
 ```powershell
 .\target\release\runtime_stress.exe --scenario full-fill-same-level --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
 .\target\release\runtime_stress.exe --scenario market-quote-sweep --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
-.\target\release\runtime_stress.exe --scenario partial-fill-rest --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
 ```
 
 ```bash
 ./target/release/runtime_stress --scenario full-fill-same-level --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
 ./target/release/runtime_stress --scenario market-quote-sweep --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
-./target/release/runtime_stress --scenario partial-fill-rest --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
 ```
 
-4. 성공 취소/정정 경로의 병목을 비교한다.
+4. 잔존 주문이 누적되는 부하를 별도로 관측한다.
+
+```powershell
+.\target\release\runtime_stress.exe --scenario partial-fill-rest --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
+.\target\release\runtime_stress.exe --scenario place-resting-limit --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
+```
+
+```bash
+./target/release/runtime_stress --scenario partial-fill-rest --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
+./target/release/runtime_stress --scenario place-resting-limit --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
+```
+
+이 결과는 잔존 주문이 누적되는 non-stationary workload의 관측값이다. `full-fill-same-level`, `market-quote-sweep`의 안정 TPS와 직접 비교하지 않는다.
+
+5. 성공 취소/정정 경로의 병목을 비교한다.
 
 ```powershell
 .\target\release\runtime_stress.exe --scenario cancel-resting-order --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
@@ -149,7 +175,7 @@ Windows는 `.exe` 파일을, macOS/Linux는 확장자 없는 binary를 실행한
 ./target/release/runtime_stress --scenario amend-price-change --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --timeout-sec 30
 ```
 
-5. 심볼 수를 늘려 확장성을 확인한다.
+6. 심볼 수를 늘려 확장성을 확인한다.
 
 ```powershell
 .\target\release\runtime_stress.exe --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --symbols 1 --sweep-depth 10 --timeout-sec 30
@@ -163,7 +189,7 @@ Windows는 `.exe` 파일을, macOS/Linux는 확장자 없는 binary를 실행한
 ./target/release/runtime_stress --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --symbols 4 --sweep-depth 10 --timeout-sec 30
 ```
 
-6. publisher 지연을 넣어 결과 발행 병목을 확인한다.
+7. publisher 지연을 넣어 결과 발행 병목을 확인한다.
 
 ```powershell
 .\target\release\runtime_stress.exe --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --publisher-delay-ms 1 --timeout-sec 30
@@ -175,7 +201,7 @@ Windows는 `.exe` 파일을, macOS/Linux는 확장자 없는 binary를 실행한
 ./target/release/runtime_stress --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --publisher-delay-ms 5 --timeout-sec 30
 ```
 
-7. 순간 burst 한계를 보고 싶을 때만 기존 `--orders` 모드를 사용한다.
+8. 순간 burst 한계를 보고 싶을 때만 기존 `--orders` 모드를 사용한다.
 
 ```powershell
 .\target\release\runtime_stress.exe --orders 1000 --sweep-depth 10 --timeout-sec 30
