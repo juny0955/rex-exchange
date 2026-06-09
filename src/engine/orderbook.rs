@@ -20,22 +20,41 @@ pub struct OrderBook {
 }
 
 impl OrderBook {
-    /// 최상위 반대 호가 조회
-    /// Side::Buy -> asks
-    /// Side::Sell -> bids
-    pub fn get_best_opposite(&self, side: &Side) -> Option<(Decimal, VecDeque<Uuid>)> {
+    pub fn best_opposite_price(&self, side: &Side) -> Option<Decimal> {
         match side {
-            Side::Buy => self
-                .asks
-                .iter()
-                .next()
-                .map(|(price, order_ids)| (*price, order_ids.clone())),
-            Side::Sell => self
-                .bids
-                .iter()
-                .next()
-                .map(|(price, order_ids)| (price.0, order_ids.clone())),
+            Side::Buy => self.asks.keys().next().copied(),
+            Side::Sell => self.bids.keys().next().map(|p| p.0),
         }
+    }
+
+    pub fn peek_best_opposite_maker(&self, side: &Side) -> Option<Uuid> {
+        match side {
+            Side::Buy => self.asks.values().next().and_then(|q| q.front().copied()),
+            Side::Sell => self.bids.values().next().and_then(|q| q.front().copied()),
+        }
+    }
+
+    pub fn pop_best_opposite_maker(&mut self, side: &Side) -> Option<Order> {
+        let maker_id = match side {
+            Side::Buy => {
+                let (&price, queue) = self.asks.iter_mut().next()?;
+                let maker_id = queue.pop_front()?;
+                if queue.is_empty() {
+                    self.asks.remove(&price);
+                }
+                maker_id
+            }
+            Side::Sell => {
+                let (&price, queue) = self.bids.iter_mut().next()?;
+                let maker_id = queue.pop_front()?;
+                if queue.is_empty() {
+                    self.bids.remove(&price);
+                }
+                maker_id
+            }
+        };
+
+        self.index.remove(&maker_id)
     }
 
     /// 주문 추가
@@ -220,13 +239,13 @@ mod tests {
         ob.add_order(make_ask(Decimal::new(200, 0), Decimal::new(5, 0)));
         ob.add_order(make_ask(Decimal::new(100, 0), Decimal::new(5, 0)));
 
-        let (ask_price, _) = ob.get_best_opposite(&Side::Buy).unwrap();
+        let ask_price = ob.best_opposite_price(&Side::Buy).unwrap();
         assert_eq!(ask_price, Decimal::new(100, 0)); // 최저 매도호가
 
         ob.add_order(make_bid(Decimal::new(80, 0), Decimal::new(5, 0)));
         ob.add_order(make_bid(Decimal::new(90, 0), Decimal::new(5, 0)));
 
-        let (bid_price, _) = ob.get_best_opposite(&Side::Sell).unwrap();
+        let bid_price = ob.best_opposite_price(&Side::Sell).unwrap();
         assert_eq!(bid_price, Decimal::new(90, 0)); // 최고 매수호가
     }
 
@@ -263,10 +282,10 @@ mod tests {
         let order_id = order.order_id;
         ob.add_order(order);
 
-        assert!(ob.get_best_opposite(&Side::Buy).is_some());
+        assert!(ob.best_opposite_price(&Side::Buy).is_some());
 
         ob.remove_order(order_id);
 
-        assert!(ob.get_best_opposite(&Side::Buy).is_none());
+        assert!(ob.best_opposite_price(&Side::Buy).is_none());
     }
 }

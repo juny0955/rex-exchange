@@ -1,5 +1,3 @@
-use std::collections::VecDeque;
-
 use crossbeam::channel::{Receiver, Sender};
 use rust_decimal::Decimal;
 use tracing::{debug, error, info, warn};
@@ -219,36 +217,32 @@ impl MatchingEngine {
     /// 주문 매칭
     fn match_order(&mut self, taker: Order) -> MatchResult {
         let mut result = MatchResult::new(taker);
+        let taker_side = result.taker.side;
 
-        while let Some((price, makers)) = self.orderbook.get_best_opposite(&result.taker.side) {
+        while let Some(price) = self.orderbook.best_opposite_price(&taker_side) {
             if !can_match(&result.taker, price) {
                 break;
             }
 
-            self.match_price_level(makers, &mut result);
-
-            if result.taker.is_filled() {
+            let Some(maker_id) = self.orderbook.peek_best_opposite_maker(&taker_side) else {
                 break;
-            }
-        }
+            };
 
-        result
-    }
-
-    /// 단일 Price level과 주문 매칭 수행
-    fn match_price_level(&mut self, makers: VecDeque<Uuid>, result: &mut MatchResult) {
-        for maker_id in makers {
             let Some(maker) = self.orderbook.get_order_mut(&maker_id) else {
                 error!(symbol = %self.symbol, maker_order_id = %maker_id, "오더북 불일치: 인덱스에 주문 없음");
+                self.orderbook.pop_best_opposite_maker(&taker_side);
                 continue;
             };
+
             let Some(maker_price) = maker.price else {
                 error!(symbol = %self.symbol, maker_order_id = %maker_id, "잘못된 메이커 주문: LIMIT 주문 가격 없음");
+                self.orderbook.pop_best_opposite_maker(&taker_side);
                 continue;
             };
 
             let Some(fill_base) = calc_fill_base(&result.taker, maker) else {
-                error!(symbol = %self.symbol, taker_order_id = %result.taker.order_id, maker_order_id = %maker.order_id, "체결 수량 계산 실패");
+                error!(symbol = %self.symbol, taker_order_id = %result.taker.order_id, maker_order_id = %maker_id, "체결 수량 계산 실패");
+                self.orderbook.pop_best_opposite_maker(&taker_side);
                 continue;
             };
             let fill_quote = fill_base * maker_price;
@@ -264,6 +258,9 @@ impl MatchingEngine {
             *maker = filled_maker;
             result.taker = filled_taker;
 
+            let maker_filled = maker.is_filled();
+            result.updated_makers.push(OrderSnapshot::from(&*maker)); // ← maker 마지막 사용
+
             result.trades.push(TradeResult {
                 trade_id: Uuid::now_v7(),
                 taker_order_id: result.taker.order_id,
@@ -272,29 +269,30 @@ impl MatchingEngine {
                 base_qty: fill_base,
                 quote_qty: fill_quote,
             });
-            result.updated_makers.push(OrderSnapshot::from(&*maker));
 
             info!(
                 symbol = %self.symbol,
                 taker_order_id = %result.taker.order_id,
-                maker_order_id = %maker.order_id,
+                maker_order_id = %maker_id,
                 price = %maker_price,
                 fill_base = %fill_base,
                 fill_quote = %fill_quote,
                 taker_filled = result.taker.is_filled(),
-                maker_filled = maker.is_filled(),
+                maker_filled = maker_filled,
                 "주문 체결"
             );
 
-            if maker.is_filled() {
+            if maker_filled {
                 debug!(symbol = %self.symbol, maker_order_id = %maker_id, "메이커 주문 완전 체결 후 오더북 제거");
-                self.orderbook.remove_order(maker_id);
+                self.orderbook.pop_best_opposite_maker(&taker_side);
             }
 
             if result.taker.is_filled() {
                 break;
             }
         }
+
+        result
     }
 
     fn add_to_orderbook_if_remaining(&mut self, taker: Order) {
@@ -512,7 +510,7 @@ mod tests {
 
         engine.place_order(limit_order(Side::Buy, TimeInForce::GTC, 100, 10));
 
-        assert!(engine.orderbook.get_best_opposite(&Side::Buy).is_none());
+        assert!(engine.orderbook.best_opposite_price(&Side::Buy).is_none());
     }
 
     #[test]
@@ -568,11 +566,11 @@ mod tests {
 
         // 매도 없음 → BUY GTC 잔존
         engine.place_order(limit_order(Side::Buy, TimeInForce::GTC, 100, 5));
-        assert!(engine.orderbook.get_best_opposite(&Side::Sell).is_some());
+        assert!(engine.orderbook.best_opposite_price(&Side::Sell).is_some());
 
         // SELL 진입 → 잔존 BUY와 체결
         engine.place_order(limit_order(Side::Sell, TimeInForce::GTC, 100, 5));
-        assert!(engine.orderbook.get_best_opposite(&Side::Sell).is_none());
+        assert!(engine.orderbook.best_opposite_price(&Side::Sell).is_none());
     }
 
     #[test]
@@ -585,7 +583,7 @@ mod tests {
         // IOC Buy 10, Sell 5만 존재 → 5 체결, 잔량 5는 오더북 미등록
         engine.place_order(limit_order(Side::Buy, TimeInForce::IOC, 100, 10));
 
-        assert!(engine.orderbook.get_best_opposite(&Side::Sell).is_none());
+        assert!(engine.orderbook.best_opposite_price(&Side::Sell).is_none());
     }
 
     #[test]
@@ -598,7 +596,7 @@ mod tests {
         // MARKET SELL + Quote → 거부
         engine.place_order(market_quote_order(Side::Sell, 500));
 
-        assert!(engine.orderbook.get_best_opposite(&Side::Sell).is_some());
+        assert!(engine.orderbook.best_opposite_price(&Side::Sell).is_some());
     }
 
     #[test]
@@ -620,7 +618,7 @@ mod tests {
         assert_eq!(snapshot.status, OrderStatus::Cancelled);
         assert_eq!(snapshot.executed_base_qty, Decimal::ZERO);
         assert_eq!(snapshot.remaining_base_qty, Some(Decimal::new(10, 0)));
-        assert!(engine.orderbook.get_best_opposite(&Side::Sell).is_none());
+        assert!(engine.orderbook.best_opposite_price(&Side::Sell).is_none());
     }
 
     #[test]
@@ -645,7 +643,7 @@ mod tests {
         assert_eq!(snapshot.status, OrderStatus::Cancelled);
         assert_eq!(snapshot.executed_base_qty, Decimal::new(5, 0));
         assert_eq!(snapshot.remaining_base_qty, Some(Decimal::new(5, 0)));
-        assert!(engine.orderbook.get_best_opposite(&Side::Sell).is_none());
+        assert!(engine.orderbook.best_opposite_price(&Side::Sell).is_none());
     }
 
     #[test]

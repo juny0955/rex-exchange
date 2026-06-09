@@ -12,10 +12,6 @@ fn bench_add_order(c: &mut Criterion) {
     orderbook_bench::add_order::bench(c);
 }
 
-fn bench_get_best_opposite(c: &mut Criterion) {
-    orderbook_bench::get_best_opposite::bench(c);
-}
-
 fn bench_can_fully_fill_base(c: &mut Criterion) {
     orderbook_bench::can_fully_fill_base::bench(c);
 }
