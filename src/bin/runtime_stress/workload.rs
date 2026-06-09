@@ -3,7 +3,7 @@ use std::time::SystemTime;
 use chrono::{DateTime, Utc};
 use matching_engine::{
     domain::order::{Order, OrderSize, OrderStatus, OrderType, Side, TimeInForce},
-    engine::command::EngineCommand,
+    engine::command::{AmendOrderCommand, EngineCommand},
 };
 use rust_decimal::Decimal;
 use uuid::Uuid;
@@ -126,6 +126,56 @@ fn make_workload(
             )));
             commands
         }
+        Scenario::CancelRestingOrder => {
+            let mut commands = Vec::with_capacity(sweep_depth * 2);
+            let mut order_ids = Vec::with_capacity(sweep_depth);
+
+            for _ in 0..sweep_depth {
+                let order_id = next_order_id(next_order_no);
+                order_ids.push(order_id);
+                commands.push(EngineCommand::Place(make_limit_order(
+                    order_id,
+                    symbol,
+                    Side::Buy,
+                    TimeInForce::GTC,
+                    10_000,
+                    1,
+                )));
+            }
+
+            commands.extend(order_ids.into_iter().map(EngineCommand::Cancel));
+            commands
+        }
+        Scenario::AmendDecreaseQty => {
+            let order_id = next_order_id(next_order_no);
+            vec![
+                EngineCommand::Place(make_limit_order(
+                    order_id,
+                    symbol,
+                    Side::Buy,
+                    TimeInForce::GTC,
+                    10_000,
+                    2,
+                )),
+                EngineCommand::Amend(make_amend_order_command(order_id, 10_000, 1)),
+                EngineCommand::Cancel(order_id),
+            ]
+        }
+        Scenario::AmendPriceChange => {
+            let order_id = next_order_id(next_order_no);
+            vec![
+                EngineCommand::Place(make_limit_order(
+                    order_id,
+                    symbol,
+                    Side::Buy,
+                    TimeInForce::GTC,
+                    10_000,
+                    1,
+                )),
+                EngineCommand::Amend(make_amend_order_command(order_id, 10_001, 1)),
+                EngineCommand::Cancel(order_id),
+            ]
+        }
     }
 }
 
@@ -172,6 +222,14 @@ fn make_market_quote_buy_order(order_id: Uuid, symbol: &str, quote: i64) -> Orde
         status: OrderStatus::New,
         created_at: fixed_time(),
         updated_at: fixed_time(),
+    }
+}
+
+fn make_amend_order_command(order_id: Uuid, price: i64, qty: i64) -> AmendOrderCommand {
+    AmendOrderCommand {
+        order_id,
+        price: Some(Decimal::new(price, 0)),
+        base_qty: Some(Decimal::new(qty, 0)),
     }
 }
 
@@ -256,5 +314,112 @@ mod tests {
                 ..
             })) if *qty == Decimal::new(4, 0)
         ));
+    }
+
+    #[test]
+    fn make_workload_cancel_resting_order_places_then_cancels_same_orders() {
+        let mut generator = WorkloadGenerator::default();
+        let commands = generator.make_workload(Scenario::CancelRestingOrder, 3, BASE_SYMBOL);
+
+        assert_eq!(commands.len(), 6);
+
+        let place_ids: Vec<Uuid> = commands[..3]
+            .iter()
+            .map(|cmd| match cmd {
+                EngineCommand::Place(Order {
+                    side: Side::Buy,
+                    order_type: OrderType::Limit,
+                    tif: TimeInForce::GTC,
+                    price: Some(price),
+                    size: OrderSize::Base(qty),
+                    ..
+                }) if *price == Decimal::new(10_000, 0) && *qty == Decimal::new(1, 0) => {
+                    cmd.order_id()
+                }
+                _ => panic!("expected resting buy limit place command"),
+            })
+            .collect();
+
+        let cancel_ids: Vec<Uuid> = commands[3..]
+            .iter()
+            .map(|cmd| match cmd {
+                EngineCommand::Cancel(order_id) => *order_id,
+                _ => panic!("expected cancel command"),
+            })
+            .collect();
+
+        assert_eq!(cancel_ids, place_ids);
+    }
+
+    #[test]
+    fn make_workload_amend_decrease_qty_places_amends_then_cancels_same_order() {
+        let mut generator = WorkloadGenerator::default();
+        let commands = generator.make_workload(Scenario::AmendDecreaseQty, 3, BASE_SYMBOL);
+
+        assert_eq!(commands.len(), 3);
+
+        let EngineCommand::Place(Order {
+            order_id,
+            side: Side::Buy,
+            order_type: OrderType::Limit,
+            tif: TimeInForce::GTC,
+            price: Some(price),
+            size: OrderSize::Base(qty),
+            ..
+        }) = &commands[0]
+        else {
+            panic!("expected initial resting place command");
+        };
+
+        assert_eq!(*price, Decimal::new(10_000, 0));
+        assert_eq!(*qty, Decimal::new(2, 0));
+
+        let EngineCommand::Amend(command) = &commands[1] else {
+            panic!("expected amend command");
+        };
+
+        assert_eq!(command.order_id, *order_id);
+        assert_eq!(command.price, Some(Decimal::new(10_000, 0)));
+        assert_eq!(command.base_qty, Some(Decimal::new(1, 0)));
+
+        assert!(
+            matches!(&commands[2], EngineCommand::Cancel(cancel_id) if *cancel_id == *order_id)
+        );
+    }
+
+    #[test]
+    fn make_workload_amend_price_change_places_amends_then_cancels_same_order() {
+        let mut generator = WorkloadGenerator::default();
+        let commands = generator.make_workload(Scenario::AmendPriceChange, 3, BASE_SYMBOL);
+
+        assert_eq!(commands.len(), 3);
+
+        let EngineCommand::Place(Order {
+            order_id,
+            side: Side::Buy,
+            order_type: OrderType::Limit,
+            tif: TimeInForce::GTC,
+            price: Some(price),
+            size: OrderSize::Base(qty),
+            ..
+        }) = &commands[0]
+        else {
+            panic!("expected initial resting place command");
+        };
+
+        assert_eq!(*price, Decimal::new(10_000, 0));
+        assert_eq!(*qty, Decimal::new(1, 0));
+
+        let EngineCommand::Amend(command) = &commands[1] else {
+            panic!("expected amend command");
+        };
+
+        assert_eq!(command.order_id, *order_id);
+        assert_eq!(command.price, Some(Decimal::new(10_001, 0)));
+        assert_eq!(command.base_qty, Some(Decimal::new(1, 0)));
+
+        assert!(
+            matches!(&commands[2], EngineCommand::Cancel(cancel_id) if *cancel_id == *order_id)
+        );
     }
 }

@@ -180,6 +180,18 @@ fn scenario_parse_accepts_matching_scenarios() {
         Scenario::parse("partial-fill-rest").unwrap(),
         Scenario::PartialFillRest
     );
+    assert_eq!(
+        Scenario::parse("cancel-resting-order").unwrap(),
+        Scenario::CancelRestingOrder
+    );
+    assert_eq!(
+        Scenario::parse("amend-decrease-qty").unwrap(),
+        Scenario::AmendDecreaseQty
+    );
+    assert_eq!(
+        Scenario::parse("amend-price-change").unwrap(),
+        Scenario::AmendPriceChange
+    );
 }
 
 #[test]
@@ -204,6 +216,12 @@ fn scenario_display_name_returns_korean_label() {
         Scenario::PartialFillRest.display_name(),
         "부분 체결 후 잔존"
     );
+    assert_eq!(
+        Scenario::CancelRestingOrder.display_name(),
+        "잔존 주문 취소"
+    );
+    assert_eq!(Scenario::AmendDecreaseQty.display_name(), "수량 감소 정정");
+    assert_eq!(Scenario::AmendPriceChange.display_name(), "가격 변경 정정");
 }
 
 #[test]
@@ -218,4 +236,7 @@ fn scenario_parse_rejects_unknown_scenario_in_korean() {
 fn scenario_token_returns_cli_value() {
     assert_eq!(Scenario::FullFillSameLevel.token(), "full-fill-same-level");
     assert_eq!(Scenario::CancelMissing.token(), "cancel-missing");
+    assert_eq!(Scenario::CancelRestingOrder.token(), "cancel-resting-order");
+    assert_eq!(Scenario::AmendDecreaseQty.token(), "amend-decrease-qty");
+    assert_eq!(Scenario::AmendPriceChange.token(), "amend-price-change");
 }

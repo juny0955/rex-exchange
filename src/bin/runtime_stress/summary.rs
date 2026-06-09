@@ -37,7 +37,7 @@ pub fn print_paced_summary(
 pub fn print_usage() {
     eprintln!(
         "사용법: cargo run --release --bin runtime_stress -- \
-         [--scenario cancel-missing|place-resting-limit|full-fill-same-level|market-quote-sweep|partial-fill-rest] \
+         [--scenario cancel-missing|place-resting-limit|full-fill-same-level|market-quote-sweep|partial-fill-rest|cancel-resting-order|amend-decrease-qty|amend-price-change] \
          [--orders N] \
          [--duration-sec N --target-commands-per-sec N] \
          [--warmup-sec N] \

@@ -20,6 +20,9 @@ pub enum Scenario {
     FullFillSameLevel,
     MarketQuoteSweep,
     PartialFillRest,
+    CancelRestingOrder,
+    AmendDecreaseQty,
+    AmendPriceChange,
 }
 
 impl Scenario {
@@ -30,6 +33,9 @@ impl Scenario {
             "full-fill-same-level" => Ok(Self::FullFillSameLevel),
             "market-quote-sweep" => Ok(Self::MarketQuoteSweep),
             "partial-fill-rest" => Ok(Self::PartialFillRest),
+            "cancel-resting-order" => Ok(Self::CancelRestingOrder),
+            "amend-decrease-qty" => Ok(Self::AmendDecreaseQty),
+            "amend-price-change" => Ok(Self::AmendPriceChange),
             _ => Err(format!("지원하지 않는 시나리오: {value}")),
         }
     }
@@ -41,6 +47,9 @@ impl Scenario {
             Self::FullFillSameLevel => "동일 호가 전량 체결",
             Self::MarketQuoteSweep => "시장가 금액 스윕",
             Self::PartialFillRest => "부분 체결 후 잔존",
+            Self::CancelRestingOrder => "잔존 주문 취소",
+            Self::AmendDecreaseQty => "수량 감소 정정",
+            Self::AmendPriceChange => "가격 변경 정정",
         }
     }
 
@@ -51,6 +60,9 @@ impl Scenario {
             Self::FullFillSameLevel => "full-fill-same-level",
             Self::MarketQuoteSweep => "market-quote-sweep",
             Self::PartialFillRest => "partial-fill-rest",
+            Self::CancelRestingOrder => "cancel-resting-order",
+            Self::AmendDecreaseQty => "amend-decrease-qty",
+            Self::AmendPriceChange => "amend-price-change",
         }
     }
 }
