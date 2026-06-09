@@ -13,6 +13,7 @@
 | 문서 | 용도 |
 | --- | --- |
 | [OrderBook 벤치마크 기준선](./orderbook_벤치마크_기준.md) | 기준 수치, 해석 포인트 |
+| [peek/pop 최적화 개선 내역 (e61fddd)](./orderbook_peek-pop_개선.md) | price queue clone 제거 전후 비교 |
 
 새로운 `OrderBook` 최적화 측정 결과가 생기면 이 표에 개선 내역 문서를 추가한다.
 

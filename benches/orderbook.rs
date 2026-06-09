@@ -27,7 +27,6 @@ fn bench_remove_order(c: &mut Criterion) {
 criterion_group!(
     benches,
     bench_add_order,
-    bench_get_best_opposite,
     bench_can_fully_fill_base,
     bench_can_fully_fill_quote,
     bench_remove_order
