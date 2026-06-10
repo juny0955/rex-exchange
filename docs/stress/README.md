@@ -2,6 +2,7 @@
 
 이 디렉터리는 `runtime_stress` 부하 테스트의 실행 방법, 시나리오별 기준선, 개선 비교 결과를 관리하는 공간이다.
 Criterion 벤치마크 문서는 `docs/bench`에 두고, 런타임 채널 포화와 result publish 경로를 보는 부하 테스트는 이 위키에서 관리한다.
+gRPC 인그레스부터 Kafka 발행까지 종단(E2E) 부하는 `integration_stress`로 측정한다.
 
 ## 고정 측정 환경
 
@@ -32,6 +33,7 @@ runtime stress 기준선과 개선 비교는 아래 환경에서 고정 측정�
 | 문서 | 용도 |
 | --- | --- |
 | [Runtime Stress 테스트](./runtime_stress.md) | `runtime_stress` 도구의 목적, 옵션, 시나리오, 실행 방법 |
+| [Integration Stress 테스트](./integration_stress.md) | `integration_stress` 도구의 목적, 옵션, 시나리오, gRPC+Kafka 종단 실행 방법 |
 | [full-fill-same-level](./scenarios/full-fill-same-level/README.md) | 동일 호가 전량 체결 시나리오의 측정 요약과 측정 내역 |
 | [market-quote-sweep](./scenarios/market-quote-sweep/README.md) | 시장가 금액 스윕 시나리오의 측정 요약과 측정 내역 |
 | [partial-fill-rest](./scenarios/partial-fill-rest/README.md) | 부분 체결 후 잔존 시나리오의 측정 요약과 측정 내역 |
