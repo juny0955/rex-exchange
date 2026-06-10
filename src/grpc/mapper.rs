@@ -51,8 +51,7 @@ pub fn map_place_order_request(request: PlaceOrderRequest) -> Result<Order, Stat
         None => return Err(Status::invalid_argument("주문 수량은 필수입니다")),
     };
 
-    if matches!(size, order::OrderSize::Quote(_)) && !matches!(order_type, order::OrderType::Market)
-        || !matches!(side, order::Side::Buy)
+    if matches!(size, order::OrderSize::Quote(_)) && (!matches!(order_type, order::OrderType::Market) || !matches!(side, order::Side::Buy))
     {
         return Err(Status::invalid_argument(
             "Quote는 MARKET BUY 주문에만 사용할 수 있습니다",
