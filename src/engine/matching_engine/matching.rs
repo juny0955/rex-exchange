@@ -1,5 +1,5 @@
 use rust_decimal::Decimal;
-use tracing::{debug, error, info};
+use tracing::{debug, error};
 use uuid::Uuid;
 
 use crate::{
@@ -82,7 +82,7 @@ impl MatchingEngine {
                 quote_qty: fill_quote,
             });
 
-            info!(
+            debug!(
                 symbol = %self.symbol,
                 taker_order_id = %result.taker.order_id,
                 maker_order_id = %maker_id,
