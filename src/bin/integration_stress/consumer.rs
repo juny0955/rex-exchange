@@ -176,8 +176,5 @@ fn handle_message(state: &mut CorrelatorState, received: &Arc<AtomicU64>, payloa
 }
 
 fn assignment_count(consumer: &StreamConsumer) -> usize {
-    consumer
-        .assignment()
-        .map(|tpl| tpl.count())
-        .unwrap_or(0)
+    consumer.assignment().map(|tpl| tpl.count()).unwrap_or(0)
 }

@@ -48,7 +48,11 @@ fn render_report(config: &Config, report: &RunReport) -> String {
         &format!("{:.2}%", percentage(d.accepted, report.attempted as u64)),
     );
     if report.pacing_lag_events > 0 {
-        push_row(&mut out, "pacing 지연 횟수", &count(report.pacing_lag_events as u64));
+        push_row(
+            &mut out,
+            "pacing 지연 횟수",
+            &count(report.pacing_lag_events as u64),
+        );
         push_row(&mut out, "pacing 지연 합계", &dur(report.pacing_lag));
     }
     out.push('\n');
@@ -71,7 +75,11 @@ fn render_report(config: &Config, report: &RunReport) -> String {
 
     push_section(&mut out, "[처리량]");
     push_row(&mut out, "접수 소요 시간", &dur(report.dispatch_elapsed));
-    push_row(&mut out, "전체 소요 시간(접수+settle)", &dur(report.total_elapsed));
+    push_row(
+        &mut out,
+        "전체 소요 시간(접수+settle)",
+        &dur(report.total_elapsed),
+    );
     push_row(
         &mut out,
         "초당 접수 성공 수",
@@ -91,7 +99,11 @@ fn push_conditions(out: &mut String, config: &Config) {
     push_row(
         out,
         "시나리오",
-        &format!("{} ({})", config.scenario.display_name(), config.scenario.token()),
+        &format!(
+            "{} ({})",
+            config.scenario.display_name(),
+            config.scenario.token()
+        ),
     );
     push_row(out, "실행 모드", &mode_label(&config.mode));
     push_row(out, "심볼 수", &count(config.symbols as u64));
@@ -100,7 +112,11 @@ fn push_conditions(out: &mut String, config: &Config) {
     push_row(out, "gRPC 엔드포인트", &config.grpc_endpoint);
     push_row(out, "Kafka 브로커", &config.kafka_brokers);
     push_row(out, "Kafka 토픽", &config.kafka_topic);
-    push_row(out, "settle 제한 시간", &format!("{}s", config.settle_timeout.as_secs()));
+    push_row(
+        out,
+        "settle 제한 시간",
+        &format!("{}s", config.settle_timeout.as_secs()),
+    );
 }
 
 fn push_latency(out: &mut String, latency: &LatencySummary) {

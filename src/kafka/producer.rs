@@ -4,7 +4,7 @@ use rdkafka::{
     ClientConfig, ClientContext, Message,
     producer::{BaseRecord, Producer, ProducerContext, ThreadedProducer},
 };
-use tracing::{error, info};
+use tracing::{debug, error};
 
 use crate::{
     engine::{
@@ -38,7 +38,7 @@ impl ProducerContext for KafkaDeliveryContext {
         meta: Self::DeliveryOpaque,
     ) {
         match delivery_result {
-            Ok(message) => info!(
+            Ok(message) => debug!(
                 event_id = %meta.event_id,
                 symbol = %meta.symbol,
                 order_id = %meta.order_id,

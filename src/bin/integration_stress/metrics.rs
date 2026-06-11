@@ -33,7 +33,10 @@ impl CorrelatorState {
             return;
         }
 
-        self.pending_sends.entry(order_id).or_default().push_back(at);
+        self.pending_sends
+            .entry(order_id)
+            .or_default()
+            .push_back(at);
     }
 
     pub fn on_recv(&mut self, order_id: String, event_id: String, at: Instant) {
@@ -49,7 +52,10 @@ impl CorrelatorState {
             return;
         }
 
-        self.pending_recvs.entry(order_id).or_default().push_back(at);
+        self.pending_recvs
+            .entry(order_id)
+            .or_default()
+            .push_back(at);
     }
 
     fn record_latency(&mut self, send_at: Instant, recv_at: Instant) {
@@ -144,10 +150,7 @@ fn percentile(sorted: &[u64], p: f64) -> u64 {
 }
 
 /// order_id 큐에서 맨 앞 항목을 꺼내고, 비면 엔트리를 제거한다.
-fn pop_front(
-    map: &mut HashMap<String, VecDeque<Instant>>,
-    order_id: &str,
-) -> Option<Instant> {
+fn pop_front(map: &mut HashMap<String, VecDeque<Instant>>, order_id: &str) -> Option<Instant> {
     let queue = map.get_mut(order_id)?;
     let value = queue.pop_front();
     if queue.is_empty() {
