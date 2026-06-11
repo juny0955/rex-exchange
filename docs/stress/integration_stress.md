@@ -2,8 +2,9 @@
 
 관련 문서:
 
-- [Runtime Stress 위키 홈](./README.md)
+- [Stress 테스트 홈](./README.md)
 - [Runtime Stress 테스트](./runtime_stress.md)
+- [Stress 시나리오](./scenarios/README.md)
 
 `integration_stress`는 gRPC 인그레스부터 Kafka 발행까지 **실제 종단(E2E) 경로**에 부하를 거는 수동 실행 도구다.
 `runtime_stress`가 `EngineRuntime`만 인프로세스로 측정하고 gRPC와 Kafka를 우회하는 것과 달리,
@@ -25,6 +26,7 @@ gRPC client -> :50051 tonic server -> EngineDispatcher -> MatchingEngine -> Kafk
 | 백프레셔 | 고부하 시 gRPC 503(RESOURCE_EXHAUSTED = 엔진 채널 포화) 발생 비율 |
 
 `runtime_stress`는 매칭엔진 내부 처리량 한계를 빠르게 보는 데 쓰고, `integration_stress`는 운영에 가까운 종단 지연과 무손실을 검증하는 데 쓴다.
+측정 결과와 기준선은 [Stress 시나리오](./scenarios/README.md) 아래에 시나리오별로 기록한다.
 
 ## 사전 준비
 

@@ -2,14 +2,15 @@
 
 관련 문서:
 
-- [Runtime Stress 위키 홈](./README.md)
-- [full-fill-same-level 측정 요약](./scenarios/full-fill-same-level/README.md)
-- [market-quote-sweep 측정 요약](./scenarios/market-quote-sweep/README.md)
-- [partial-fill-rest 측정 요약](./scenarios/partial-fill-rest/README.md)
-- [place-resting-limit 측정 요약](./scenarios/place-resting-limit/README.md)
-- [cancel-resting-order 측정 요약](./scenarios/cancel-resting-order/README.md)
-- [amend-decrease-qty 측정 요약](./scenarios/amend-decrease-qty/README.md)
-- [amend-price-change 측정 요약](./scenarios/amend-price-change/README.md)
+- [Stress 테스트 홈](./README.md)
+- [Stress 시나리오](./scenarios/README.md)
+- [full-fill-same-level Runtime 측정](./scenarios/full-fill-same-level/runtime/README.md)
+- [market-quote-sweep Runtime 측정](./scenarios/market-quote-sweep/runtime/README.md)
+- [partial-fill-rest Runtime 측정](./scenarios/partial-fill-rest/runtime/README.md)
+- [place-resting-limit Runtime 측정](./scenarios/place-resting-limit/runtime/README.md)
+- [cancel-resting-order Runtime 측정](./scenarios/cancel-resting-order/runtime/README.md)
+- [amend-decrease-qty Runtime 측정](./scenarios/amend-decrease-qty/runtime/README.md)
+- [amend-price-change Runtime 측정](./scenarios/amend-price-change/runtime/README.md)
 
 `runtime_stress`는 `EngineRuntime` 경로에 부하를 걸어 런타임 병목을 확인하는 수동 실행 도구다.
 Criterion 벤치마크처럼 안정적인 기준선을 만들기 위한 도구가 아니라, 채널 포화, 결과 발행 지연,
