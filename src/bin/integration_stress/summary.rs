@@ -28,7 +28,7 @@ pub fn print_report(config: &Config, report: &RunReport) {
     print!("{}", render_report(config, report));
 }
 
-fn render_report(config: &Config, report: &RunReport) -> String {
+pub(crate) fn render_report(config: &Config, report: &RunReport) -> String {
     let mut out = String::new();
 
     push_header(&mut out, "gRPC + Kafka 통합 부하 테스트 결과");
@@ -47,18 +47,21 @@ fn render_report(config: &Config, report: &RunReport) -> String {
         "접수 성공률",
         &format!("{:.2}%", percentage(d.accepted, report.attempted as u64)),
     );
+    push_target_achievement(&mut out, config, report);
     if report.pacing_lag_events > 0 {
         push_row(
             &mut out,
             "pacing 지연 횟수",
             &count(report.pacing_lag_events as u64),
         );
-        push_row(&mut out, "pacing 지연 합계", &dur(report.pacing_lag));
+        push_row(&mut out, "pacing 지연 누적", &dur(report.pacing_lag));
+        push_row(&mut out, "pacing 최대 지연", &dur(report.pacing_lag_max));
     }
     out.push('\n');
 
     push_section(&mut out, "[Kafka 수신 / 정합성]");
     let c = &report.correlator;
+    push_row(&mut out, "송신 알림 처리", &count(c.sent));
     push_row(&mut out, "수신 이벤트(중복 포함)", &count(c.received));
     push_row(&mut out, "고유 이벤트", &count(c.unique));
     push_row(&mut out, "상관 매칭", &count(c.matched));
@@ -154,6 +157,8 @@ fn mode_label(mode: &RunMode) -> String {
 fn verdict(report: &RunReport) -> &'static str {
     let c = &report.correlator;
     if report.settled
+        && c.sent == report.dispatch.accepted
+        && c.matched == report.dispatch.accepted
         && c.missing == 0
         && c.duplicates == 0
         && c.unmatched_recv == 0
@@ -163,6 +168,35 @@ fn verdict(report: &RunReport) -> &'static str {
     } else {
         "실패 (누락/중복/미정착 확인 필요)"
     }
+}
+
+fn push_target_achievement(out: &mut String, config: &Config, report: &RunReport) {
+    let RunMode::Paced {
+        duration,
+        target_commands_per_sec,
+        ..
+    } = &config.mode
+    else {
+        return;
+    };
+
+    let target = (*target_commands_per_sec as f64 * duration.as_secs_f64()).round() as u64;
+    push_row(out, "목표 명령 수", &count(target));
+    push_row(
+        out,
+        "실제 시도율",
+        &rate(per_sec(report.attempted as u64, report.dispatch_elapsed)),
+    );
+    push_row(
+        out,
+        "target 달성률",
+        &format!("{:.2}%", percentage(report.attempted as u64, target)),
+    );
+    push_row(
+        out,
+        "target 달성 여부",
+        yes_no((report.attempted as f64) >= target as f64 * 0.99),
+    );
 }
 
 fn push_header(out: &mut String, title: &str) {

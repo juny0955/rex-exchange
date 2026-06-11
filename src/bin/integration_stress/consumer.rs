@@ -21,7 +21,7 @@ use rdkafka::{
 use serde_json::Value;
 use tokio::{
     sync::{mpsc, oneshot},
-    time::timeout,
+    time::{sleep, timeout},
 };
 
 use crate::integration_stress::metrics::{CorrelatorState, CorrelatorSummary, SentNotice};
@@ -30,8 +30,27 @@ const READY_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// 컨슈머 태스크에 보내는 제어 메시지.
 pub enum ControlMsg {
-    /// 상관 상태와 수신 카운터를 초기화한다(warm-up 이후 측정 구간 진입 시).
-    Reset(oneshot::Sender<()>),
+    Settle {
+        expected: u64,
+        timeout: Duration,
+        ack: oneshot::Sender<SettleResult>,
+    },
+    SettleAndReset {
+        expected: u64,
+        timeout: Duration,
+        ack: oneshot::Sender<SettleResult>,
+    },
+    Finish {
+        expected: u64,
+        timeout: Duration,
+        ack: oneshot::Sender<SettleResult>,
+    },
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SettleResult {
+    pub settled: bool,
+    pub summary: CorrelatorSummary,
 }
 
 /// 토픽을 미리 생성한다(이미 있으면 무시). 최신 Kafka는 컨슈머 측 자동 토픽 생성을 막으므로,
@@ -88,7 +107,6 @@ pub async fn run_consumer(
     mut control_rx: mpsc::UnboundedReceiver<ControlMsg>,
     received: Arc<AtomicU64>,
     ready_tx: oneshot::Sender<()>,
-    mut shutdown_rx: oneshot::Receiver<()>,
 ) -> CorrelatorSummary {
     let mut state = CorrelatorState::default();
 
@@ -101,13 +119,47 @@ pub async fn run_consumer(
         tokio::select! {
             biased;
 
-            _ = &mut shutdown_rx => break,
-
-            Some(ControlMsg::Reset(ack)) = control_rx.recv() => {
-                state = CorrelatorState::default();
-                received.store(0, Ordering::Relaxed);
-                let _ = ack.send(());
-            }
+            Some(control) = control_rx.recv() => match control {
+                ControlMsg::Settle { expected, timeout, ack } => {
+                    let result = settle_correlator(
+                        &consumer,
+                        &mut sent_rx,
+                        &mut state,
+                        &received,
+                        expected,
+                        timeout,
+                        &mut sends_done,
+                    ).await;
+                    let _ = ack.send(result);
+                }
+                ControlMsg::SettleAndReset { expected, timeout, ack } => {
+                    let result = settle_correlator(
+                        &consumer,
+                        &mut sent_rx,
+                        &mut state,
+                        &received,
+                        expected,
+                        timeout,
+                        &mut sends_done,
+                    ).await;
+                    state = CorrelatorState::default();
+                    received.store(0, Ordering::Relaxed);
+                    let _ = ack.send(result);
+                }
+                ControlMsg::Finish { expected, timeout, ack } => {
+                    let result = settle_correlator(
+                        &consumer,
+                        &mut sent_rx,
+                        &mut state,
+                        &received,
+                        expected,
+                        timeout,
+                        &mut sends_done,
+                    ).await;
+                    let _ = ack.send(result);
+                    break;
+                }
+            },
 
             msg = consumer.recv() => match msg {
                 Ok(message) => handle_message(&mut state, &received, message.payload()),
@@ -122,6 +174,46 @@ pub async fn run_consumer(
     }
 
     state.finish()
+}
+
+async fn settle_correlator(
+    consumer: &StreamConsumer,
+    sent_rx: &mut mpsc::UnboundedReceiver<SentNotice>,
+    state: &mut CorrelatorState,
+    received: &Arc<AtomicU64>,
+    expected: u64,
+    timeout_duration: Duration,
+    sends_done: &mut bool,
+) -> SettleResult {
+    let deadline = Instant::now() + timeout_duration;
+
+    while !state.is_settled(expected) {
+        if Instant::now() >= deadline {
+            return SettleResult {
+                settled: false,
+                summary: state.snapshot(),
+            };
+        }
+
+        tokio::select! {
+            msg = consumer.recv() => match msg {
+                Ok(message) => handle_message(state, received, message.payload()),
+                Err(e) => eprintln!("Kafka 수신 오류(settle 중): {e}"),
+            },
+
+            sent = sent_rx.recv(), if !*sends_done => match sent {
+                Some(notice) => state.on_sent(notice.order_id, notice.at),
+                None => *sends_done = true,
+            },
+
+            _ = sleep(Duration::from_millis(2)) => {}
+        }
+    }
+
+    SettleResult {
+        settled: true,
+        summary: state.snapshot(),
+    }
 }
 
 /// 파티션 할당이 완료될 때까지 폴링한다. 토픽이 아직 없거나 리밸런스 중이면 잠시 대기한다.

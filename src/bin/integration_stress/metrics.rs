@@ -21,6 +21,7 @@ pub struct CorrelatorState {
     pending_recvs: HashMap<String, VecDeque<Instant>>,
     seen_event_ids: HashSet<String>,
     latencies_us: Vec<u64>,
+    sent: u64,
     received: u64,
     duplicates: u64,
     matched: u64,
@@ -28,6 +29,8 @@ pub struct CorrelatorState {
 
 impl CorrelatorState {
     pub fn on_sent(&mut self, order_id: String, at: Instant) {
+        self.sent += 1;
+
         if let Some(recv_at) = pop_front(&mut self.pending_recvs, &order_id) {
             self.record_latency(at, recv_at);
             return;
@@ -37,6 +40,16 @@ impl CorrelatorState {
             .entry(order_id)
             .or_default()
             .push_back(at);
+    }
+
+    pub fn is_settled(&self, expected: u64) -> bool {
+        self.sent >= expected && self.matched >= expected
+    }
+
+    pub fn snapshot(&self) -> CorrelatorSummary {
+        let mut latencies_us = self.latencies_us.clone();
+        latencies_us.sort_unstable();
+        self.summary_from_sorted(&latencies_us)
     }
 
     pub fn on_recv(&mut self, order_id: String, event_id: String, at: Instant) {
@@ -65,6 +78,11 @@ impl CorrelatorState {
     }
 
     pub fn finish(mut self) -> CorrelatorSummary {
+        self.latencies_us.sort_unstable();
+        self.summary_from_sorted(&self.latencies_us)
+    }
+
+    fn summary_from_sorted(&self, sorted_latencies: &[u64]) -> CorrelatorSummary {
         let missing = self
             .pending_sends
             .values()
@@ -75,23 +93,23 @@ impl CorrelatorState {
             .values()
             .map(|q| q.len() as u64)
             .sum::<u64>();
-
-        self.latencies_us.sort_unstable();
-
         CorrelatorSummary {
+            sent: self.sent,
             received: self.received,
             unique: self.received - self.duplicates,
             duplicates: self.duplicates,
             matched: self.matched,
             missing,
             unmatched_recv,
-            latency: LatencySummary::from_sorted(&self.latencies_us),
+            latency: LatencySummary::from_sorted(sorted_latencies),
         }
     }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CorrelatorSummary {
+    /// correlator가 처리한 접수 성공 송신 알림 수.
+    pub sent: u64,
     /// Kafka에서 수신한 총 메시지 수(중복 포함).
     pub received: u64,
     /// 고유 event_id 수.

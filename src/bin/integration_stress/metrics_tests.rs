@@ -11,6 +11,7 @@ fn 송신후_수신이면_매칭되고_지연이_측정된다() {
     state.on_recv("o1".into(), "e1".into(), t0 + Duration::from_millis(5));
 
     let summary = state.finish();
+    assert_eq!(summary.sent, 1);
     assert_eq!(summary.matched, 1);
     assert_eq!(summary.missing, 0);
     assert_eq!(summary.unmatched_recv, 0);
@@ -28,6 +29,7 @@ fn 수신이_먼저_와도_나중_송신과_매칭된다() {
     state.on_sent("o1".into(), t0);
 
     let summary = state.finish();
+    assert_eq!(summary.sent, 1);
     assert_eq!(summary.matched, 1);
     assert_eq!(summary.missing, 0);
     assert_eq!(summary.unmatched_recv, 0);
@@ -46,6 +48,7 @@ fn 동일_order_id_재사용은_fifo로_매칭된다() {
     state.on_recv("o1".into(), "cancel".into(), t0 + Duration::from_millis(12));
 
     let summary = state.finish();
+    assert_eq!(summary.sent, 2);
     assert_eq!(summary.matched, 2);
     assert_eq!(summary.missing, 0);
     // 1번째 송신(t0)↔1번째 수신(+1ms)=1ms, 2번째 송신(+10ms)↔2번째 수신(+12ms)=2ms
@@ -63,6 +66,7 @@ fn 중복_event_id는_중복으로_집계된다() {
     state.on_recv("o1".into(), "e1".into(), t0 + Duration::from_millis(2)); // 재전송
 
     let summary = state.finish();
+    assert_eq!(summary.sent, 1);
     assert_eq!(summary.received, 2);
     assert_eq!(summary.unique, 1);
     assert_eq!(summary.duplicates, 1);
@@ -79,8 +83,29 @@ fn 이벤트가_안오면_누락으로_집계된다() {
     state.on_recv("o1".into(), "e1".into(), t0 + Duration::from_millis(1));
 
     let summary = state.finish();
+    assert_eq!(summary.sent, 2);
     assert_eq!(summary.matched, 1);
     assert_eq!(summary.missing, 1);
+}
+
+#[test]
+fn 모든_송신과_수신이_매칭되어야_정착으로_본다() {
+    let mut state = CorrelatorState::default();
+    let t0 = Instant::now();
+
+    state.on_recv("o1".into(), "e1".into(), t0 + Duration::from_millis(1));
+
+    let summary = state.snapshot();
+    assert_eq!(summary.sent, 0);
+    assert_eq!(summary.matched, 0);
+    assert!(!state.is_settled(1));
+
+    state.on_sent("o1".into(), t0);
+
+    let summary = state.snapshot();
+    assert_eq!(summary.sent, 1);
+    assert_eq!(summary.matched, 1);
+    assert!(state.is_settled(1));
 }
 
 #[test]

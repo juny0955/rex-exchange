@@ -1,6 +1,7 @@
 pub mod client;
 pub mod config;
 pub mod consumer;
+pub mod dispatch;
 pub mod metrics;
 pub mod runner;
 pub mod summary;
@@ -14,3 +15,6 @@ mod metrics_tests;
 
 #[cfg(test)]
 mod client_tests;
+
+#[cfg(test)]
+mod summary_tests;

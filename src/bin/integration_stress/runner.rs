@@ -6,64 +6,24 @@
 //! - 접수(SUBMITTED)된 명령만 송신 시각을 correlator에 보고하므로, 거부/에러는 상관에서 제외된다.
 
 use std::{
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
+    sync::{Arc, atomic::AtomicU64},
     time::{Duration, Instant},
 };
 
-use matching_engine::engine::command::EngineCommand;
-use tokio::{
-    sync::{mpsc, oneshot},
-    task::JoinSet,
-    time::sleep,
-};
+use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
 use crate::integration_stress::{
-    client::{self, GrpcClient, SendOutcome, connect},
+    client::{GrpcClient, connect},
     config::{Config, RunMode},
-    consumer::{ControlMsg, build_consumer, ensure_topic, run_consumer},
+    consumer::{ControlMsg, SettleResult, build_consumer, ensure_topic, run_consumer},
+    dispatch::{PhaseOutcome, dispatch_burst, dispatch_paced},
     metrics::{CorrelatorSummary, SentNotice},
     summary::print_report,
-    workload::{WorkloadGenerator, command_interval, make_symbols},
+    workload::make_symbols,
 };
 
-#[derive(Clone, Copy, Default)]
-pub struct DispatchSnapshot {
-    pub accepted: u64,
-    pub rejected: u64,
-    pub resource_exhausted: u64,
-    pub error: u64,
-}
-
-#[derive(Default)]
-struct DispatchCounts {
-    accepted: AtomicU64,
-    rejected: AtomicU64,
-    resource_exhausted: AtomicU64,
-    error: AtomicU64,
-}
-
-impl DispatchCounts {
-    fn snapshot(&self) -> DispatchSnapshot {
-        DispatchSnapshot {
-            accepted: self.accepted.load(Ordering::Relaxed),
-            rejected: self.rejected.load(Ordering::Relaxed),
-            resource_exhausted: self.resource_exhausted.load(Ordering::Relaxed),
-            error: self.error.load(Ordering::Relaxed),
-        }
-    }
-}
-
-pub struct PhaseOutcome {
-    pub attempted: usize,
-    pub dispatch: DispatchSnapshot,
-    pub dispatch_elapsed: Duration,
-    pub pacing_lag_events: usize,
-    pub pacing_lag: Duration,
-}
+pub use crate::integration_stress::dispatch::DispatchSnapshot;
 
 pub struct RunReport {
     pub attempted: usize,
@@ -73,6 +33,7 @@ pub struct RunReport {
     pub settled: bool,
     pub pacing_lag_events: usize,
     pub pacing_lag: Duration,
+    pub pacing_lag_max: Duration,
     pub correlator: CorrelatorSummary,
 }
 
@@ -97,7 +58,6 @@ pub async fn run(config: Config) {
     let (sent_tx, sent_rx) = mpsc::unbounded_channel::<SentNotice>();
     let (control_tx, control_rx) = mpsc::unbounded_channel::<ControlMsg>();
     let (ready_tx, ready_rx) = oneshot::channel::<()>();
-    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
 
     let consumer_handle = tokio::spawn(run_consumer(
         consumer,
@@ -105,7 +65,6 @@ pub async fn run(config: Config) {
         control_rx,
         Arc::clone(&received),
         ready_tx,
-        shutdown_rx,
     ));
 
     if ready_rx.await.is_err() {
@@ -121,17 +80,12 @@ pub async fn run(config: Config) {
         }
     };
 
-    let report = run_phases(&config, &client, &sent_tx, &symbols, &received, &control_tx).await;
+    let report = run_phases(&config, &client, &sent_tx, &symbols, &control_tx).await;
 
-    // 송신 채널을 닫아 correlator가 송신 종료를 인지하게 한 뒤 컨슈머를 종료한다.
+    let _ = finish_correlator(&control_tx).await;
     drop(sent_tx);
-    let _ = shutdown_tx.send(());
-    let correlator = consumer_handle.await.unwrap_or_default();
-
-    let report = RunReport {
-        correlator,
-        ..report
-    };
+    drop(control_tx);
+    let _ = consumer_handle.await;
 
     print_report(&config, &report);
 }
@@ -141,16 +95,18 @@ async fn run_phases(
     client: &GrpcClient,
     sent_tx: &mpsc::UnboundedSender<SentNotice>,
     symbols: &[String],
-    received: &Arc<AtomicU64>,
     control_tx: &mpsc::UnboundedSender<ControlMsg>,
 ) -> RunReport {
     match config.mode {
         RunMode::Burst { orders } => {
             let dispatch_started = Instant::now();
             let phase = dispatch_burst(config, client, sent_tx, symbols, orders).await;
-            let settled = settle(received, phase.dispatch.accepted, config.settle_timeout).await;
+            let settle =
+                settle_correlator(control_tx, phase.dispatch.accepted, config.settle_timeout)
+                    .await
+                    .unwrap_or_default();
             let total_elapsed = dispatch_started.elapsed();
-            into_report(phase, total_elapsed, settled)
+            into_report(phase, total_elapsed, settle)
         }
         RunMode::Paced {
             warmup,
@@ -167,8 +123,8 @@ async fn run_phases(
                     target_commands_per_sec,
                 )
                 .await;
-                let _ = settle(received, w.dispatch.accepted, config.settle_timeout).await;
-                reset_correlator(control_tx).await;
+                settle_and_reset_correlator(control_tx, w.dispatch.accepted, config.settle_timeout)
+                    .await;
             }
 
             let dispatch_started = Instant::now();
@@ -181,185 +137,72 @@ async fn run_phases(
                 target_commands_per_sec,
             )
             .await;
-            let settled = settle(received, phase.dispatch.accepted, config.settle_timeout).await;
+            let settle =
+                settle_correlator(control_tx, phase.dispatch.accepted, config.settle_timeout)
+                    .await
+                    .unwrap_or_default();
             let total_elapsed = dispatch_started.elapsed();
-            into_report(phase, total_elapsed, settled)
+            into_report(phase, total_elapsed, settle)
         }
     }
 }
 
-fn into_report(phase: PhaseOutcome, total_elapsed: Duration, settled: bool) -> RunReport {
+fn into_report(phase: PhaseOutcome, total_elapsed: Duration, settle: SettleResult) -> RunReport {
     RunReport {
         attempted: phase.attempted,
         dispatch: phase.dispatch,
         dispatch_elapsed: phase.dispatch_elapsed,
         total_elapsed,
-        settled,
+        settled: settle.settled,
         pacing_lag_events: phase.pacing_lag_events,
         pacing_lag: phase.pacing_lag,
-        correlator: CorrelatorSummary::default(),
+        pacing_lag_max: phase.pacing_lag_max,
+        correlator: settle.summary,
     }
 }
 
-async fn dispatch_burst(
-    config: &Config,
-    client: &GrpcClient,
-    sent_tx: &mpsc::UnboundedSender<SentNotice>,
-    symbols: &[String],
-    orders: usize,
-) -> PhaseOutcome {
-    let counts = Arc::new(DispatchCounts::default());
-    let mut generator = WorkloadGenerator::default();
-    let mut set: JoinSet<()> = JoinSet::new();
-    let mut attempted = 0;
-    let started = Instant::now();
-
-    for i in 0..orders {
-        let symbol = symbols[i % symbols.len()].clone();
-        let commands = generator.make_workload(config.scenario, config.sweep_depth, &symbol);
-        attempted += commands.len();
-
-        bound_concurrency(&mut set, config.concurrency).await;
-        spawn_unit(&mut set, client, sent_tx, &counts, symbol, commands);
-    }
-
-    drain(&mut set).await;
-
-    PhaseOutcome {
-        attempted,
-        dispatch: counts.snapshot(),
-        dispatch_elapsed: started.elapsed(),
-        pacing_lag_events: 0,
-        pacing_lag: Duration::ZERO,
-    }
-}
-
-async fn dispatch_paced(
-    config: &Config,
-    client: &GrpcClient,
-    sent_tx: &mpsc::UnboundedSender<SentNotice>,
-    symbols: &[String],
-    duration: Duration,
-    target_commands_per_sec: u64,
-) -> PhaseOutcome {
-    let counts = Arc::new(DispatchCounts::default());
-    let mut generator = WorkloadGenerator::default();
-    let mut set: JoinSet<()> = JoinSet::new();
-    let interval = command_interval(target_commands_per_sec);
-
-    let started = Instant::now();
-    let deadline = started + duration;
-    let mut next_tick = started;
-    let mut attempted = 0;
-    let mut symbol_index = 0;
-    let mut pacing_lag_events = 0;
-    let mut pacing_lag = Duration::ZERO;
-
-    while Instant::now() < deadline {
-        let symbol = symbols[symbol_index % symbols.len()].clone();
-        symbol_index += 1;
-        let commands = generator.make_workload(config.scenario, config.sweep_depth, &symbol);
-        let command_count = commands.len() as u32;
-
-        let now = Instant::now();
-        if now < next_tick {
-            sleep(next_tick - now).await;
-        } else if attempted > 0 {
-            pacing_lag_events += 1;
-            pacing_lag += now - next_tick;
-        }
-
-        if Instant::now() >= deadline {
-            break;
-        }
-
-        attempted += commands.len();
-        next_tick += interval * command_count;
-
-        bound_concurrency(&mut set, config.concurrency).await;
-        spawn_unit(&mut set, client, sent_tx, &counts, symbol, commands);
-    }
-
-    drain(&mut set).await;
-
-    PhaseOutcome {
-        attempted,
-        dispatch: counts.snapshot(),
-        dispatch_elapsed: started.elapsed(),
-        pacing_lag_events,
-        pacing_lag,
-    }
-}
-
-fn spawn_unit(
-    set: &mut JoinSet<()>,
-    client: &GrpcClient,
-    sent_tx: &mpsc::UnboundedSender<SentNotice>,
-    counts: &Arc<DispatchCounts>,
-    symbol: String,
-    commands: Vec<EngineCommand>,
+async fn settle_and_reset_correlator(
+    control_tx: &mpsc::UnboundedSender<ControlMsg>,
+    expected: u64,
+    timeout: Duration,
 ) {
-    let client = client.clone();
-    let sent_tx = sent_tx.clone();
-    let counts = Arc::clone(counts);
-    set.spawn(process_unit(client, sent_tx, counts, symbol, commands));
-}
-
-async fn process_unit(
-    mut client: GrpcClient,
-    sent_tx: mpsc::UnboundedSender<SentNotice>,
-    counts: Arc<DispatchCounts>,
-    symbol: String,
-    commands: Vec<EngineCommand>,
-) {
-    for command in commands {
-        let order_id = command.order_id().to_string();
-        let at = Instant::now();
-
-        match client::send(&mut client, &symbol, &command).await {
-            SendOutcome::Submitted => {
-                counts.accepted.fetch_add(1, Ordering::Relaxed);
-                let _ = sent_tx.send(SentNotice { order_id, at });
-            }
-            SendOutcome::Rejected => {
-                counts.rejected.fetch_add(1, Ordering::Relaxed);
-            }
-            SendOutcome::ResourceExhausted => {
-                counts.resource_exhausted.fetch_add(1, Ordering::Relaxed);
-            }
-            SendOutcome::Error => {
-                counts.error.fetch_add(1, Ordering::Relaxed);
-            }
-        }
-    }
-}
-
-async fn bound_concurrency(set: &mut JoinSet<()>, limit: usize) {
-    while set.len() >= limit {
-        set.join_next().await;
-    }
-}
-
-async fn drain(set: &mut JoinSet<()>) {
-    while set.join_next().await.is_some() {}
-}
-
-async fn settle(received: &Arc<AtomicU64>, target: u64, timeout: Duration) -> bool {
-    let started = Instant::now();
-
-    while received.load(Ordering::Relaxed) < target {
-        if started.elapsed() >= timeout {
-            return false;
-        }
-        sleep(Duration::from_millis(2)).await;
-    }
-
-    true
-}
-
-async fn reset_correlator(control_tx: &mpsc::UnboundedSender<ControlMsg>) {
     let (ack_tx, ack_rx) = oneshot::channel();
-    if control_tx.send(ControlMsg::Reset(ack_tx)).is_ok() {
+    if control_tx
+        .send(ControlMsg::SettleAndReset {
+            expected,
+            timeout,
+            ack: ack_tx,
+        })
+        .is_ok()
+    {
         let _ = ack_rx.await;
     }
+}
+
+async fn settle_correlator(
+    control_tx: &mpsc::UnboundedSender<ControlMsg>,
+    expected: u64,
+    timeout: Duration,
+) -> Option<SettleResult> {
+    let (ack_tx, ack_rx) = oneshot::channel();
+    control_tx
+        .send(ControlMsg::Settle {
+            expected,
+            timeout,
+            ack: ack_tx,
+        })
+        .ok()?;
+    ack_rx.await.ok()
+}
+
+async fn finish_correlator(control_tx: &mpsc::UnboundedSender<ControlMsg>) -> Option<SettleResult> {
+    let (ack_tx, ack_rx) = oneshot::channel();
+    control_tx
+        .send(ControlMsg::Finish {
+            expected: 0,
+            timeout: Duration::ZERO,
+            ack: ack_tx,
+        })
+        .ok()?;
+    ack_rx.await.ok()
 }
