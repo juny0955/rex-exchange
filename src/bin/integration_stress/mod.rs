@@ -18,3 +18,6 @@ mod client_tests;
 
 #[cfg(test)]
 mod summary_tests;
+
+#[cfg(test)]
+mod dispatch_tests;

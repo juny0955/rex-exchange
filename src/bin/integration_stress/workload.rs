@@ -45,6 +45,17 @@ pub fn command_interval(target_commands_per_sec: u64) -> Duration {
     Duration::from_secs_f64(1.0 / target_commands_per_sec as f64)
 }
 
+pub fn commands_per_workload(scenario: Scenario, sweep_depth: usize) -> usize {
+    match scenario {
+        Scenario::CancelMissing | Scenario::PlaceRestingLimit => 1,
+        Scenario::FullFillSameLevel | Scenario::MarketQuoteSweep | Scenario::PartialFillRest => {
+            sweep_depth + 1
+        }
+        Scenario::CancelRestingOrder => sweep_depth * 2,
+        Scenario::AmendDecreaseQty | Scenario::AmendPriceChange => 3,
+    }
+}
+
 fn make_workload(
     scenario: Scenario,
     sweep_depth: usize,

@@ -7,13 +7,17 @@ use std::{
 };
 
 use matching_engine::engine::command::EngineCommand;
-use tokio::{sync::mpsc, task::JoinSet, time::sleep};
+use tokio::{
+    sync::{Mutex, mpsc},
+    task::JoinSet,
+    time::sleep,
+};
 
 use crate::integration_stress::{
     client::{self, GrpcClient, SendOutcome},
     config::Config,
     metrics::SentNotice,
-    workload::{WorkloadGenerator, command_interval},
+    workload::{WorkloadGenerator, command_interval, commands_per_workload},
 };
 
 #[derive(Clone, Copy, Default)]
@@ -52,6 +56,31 @@ pub struct PhaseOutcome {
     pub pacing_lag_max: Duration,
 }
 
+#[derive(Default)]
+pub(crate) struct PacingLag {
+    pub events: usize,
+    pub total: Duration,
+    pub max: Duration,
+}
+
+impl PacingLag {
+    pub fn record(&mut self, now: Instant, next_tick: Instant, attempted: usize) {
+        if attempted == 0 || now <= next_tick {
+            return;
+        }
+
+        let lag = now - next_tick;
+        self.events += 1;
+        self.total += lag;
+        self.max = self.max.max(lag);
+    }
+}
+
+struct WorkUnit {
+    symbol: String,
+    commands: Vec<EngineCommand>,
+}
+
 pub async fn dispatch_burst(
     config: &Config,
     client: &GrpcClient,
@@ -61,20 +90,32 @@ pub async fn dispatch_burst(
 ) -> PhaseOutcome {
     let counts = Arc::new(DispatchCounts::default());
     let mut generator = WorkloadGenerator::default();
-    let mut set: JoinSet<()> = JoinSet::new();
+    let (work_tx, work_rx) = mpsc::channel(config.concurrency);
+    let mut workers = spawn_workers(
+        config.concurrency,
+        client,
+        sent_tx,
+        Arc::clone(&counts),
+        work_rx,
+    );
     let mut attempted = 0;
     let started = Instant::now();
 
     for i in 0..orders {
         let symbol = symbols[i % symbols.len()].clone();
         let commands = generator.make_workload(config.scenario, config.sweep_depth, &symbol);
+        debug_assert_eq!(
+            commands.len(),
+            commands_per_workload(config.scenario, config.sweep_depth)
+        );
         attempted += commands.len();
-
-        bound_concurrency(&mut set, config.concurrency).await;
-        spawn_unit(&mut set, client, sent_tx, &counts, symbol, commands);
+        if work_tx.send(WorkUnit { symbol, commands }).await.is_err() {
+            break;
+        }
     }
 
-    drain(&mut set).await;
+    drop(work_tx);
+    drain(&mut workers).await;
 
     PhaseOutcome {
         attempted,
@@ -96,7 +137,14 @@ pub async fn dispatch_paced(
 ) -> PhaseOutcome {
     let counts = Arc::new(DispatchCounts::default());
     let mut generator = WorkloadGenerator::default();
-    let mut set: JoinSet<()> = JoinSet::new();
+    let (work_tx, work_rx) = mpsc::channel(config.concurrency);
+    let mut workers = spawn_workers(
+        config.concurrency,
+        client,
+        sent_tx,
+        Arc::clone(&counts),
+        work_rx,
+    );
     let interval = command_interval(target_commands_per_sec);
 
     let started = Instant::now();
@@ -104,24 +152,23 @@ pub async fn dispatch_paced(
     let mut next_tick = started;
     let mut attempted = 0;
     let mut symbol_index = 0;
-    let mut pacing_lag_events = 0;
-    let mut pacing_lag = Duration::ZERO;
-    let mut pacing_lag_max = Duration::ZERO;
+    let mut pacing_lag = PacingLag::default();
 
     while Instant::now() < deadline {
         let symbol = symbols[symbol_index % symbols.len()].clone();
         symbol_index += 1;
         let commands = generator.make_workload(config.scenario, config.sweep_depth, &symbol);
+        debug_assert_eq!(
+            commands.len(),
+            commands_per_workload(config.scenario, config.sweep_depth)
+        );
         let command_count = commands.len() as u32;
 
         let now = Instant::now();
         if now < next_tick {
             sleep(next_tick - now).await;
-        } else if attempted > 0 {
-            let lag = now - next_tick;
-            pacing_lag_events += 1;
-            pacing_lag += lag;
-            pacing_lag_max = pacing_lag_max.max(lag);
+        } else {
+            pacing_lag.record(now, next_tick, attempted);
         }
 
         if Instant::now() >= deadline {
@@ -130,41 +177,67 @@ pub async fn dispatch_paced(
 
         attempted += commands.len();
         next_tick += interval * command_count;
-
-        bound_concurrency(&mut set, config.concurrency).await;
-        spawn_unit(&mut set, client, sent_tx, &counts, symbol, commands);
+        if work_tx.send(WorkUnit { symbol, commands }).await.is_err() {
+            break;
+        }
     }
 
-    drain(&mut set).await;
+    drop(work_tx);
+    drain(&mut workers).await;
 
     PhaseOutcome {
         attempted,
         dispatch: counts.snapshot(),
         dispatch_elapsed: started.elapsed(),
-        pacing_lag_events,
-        pacing_lag,
-        pacing_lag_max,
+        pacing_lag_events: pacing_lag.events,
+        pacing_lag: pacing_lag.total,
+        pacing_lag_max: pacing_lag.max,
     }
 }
 
-fn spawn_unit(
-    set: &mut JoinSet<()>,
+fn spawn_workers(
+    count: usize,
     client: &GrpcClient,
     sent_tx: &mpsc::UnboundedSender<SentNotice>,
-    counts: &Arc<DispatchCounts>,
-    symbol: String,
-    commands: Vec<EngineCommand>,
-) {
-    let client = client.clone();
-    let sent_tx = sent_tx.clone();
-    let counts = Arc::clone(counts);
-    set.spawn(process_unit(client, sent_tx, counts, symbol, commands));
+    counts: Arc<DispatchCounts>,
+    work_rx: mpsc::Receiver<WorkUnit>,
+) -> JoinSet<()> {
+    let mut workers = JoinSet::new();
+    let work_rx = Arc::new(Mutex::new(work_rx));
+    for _ in 0..count {
+        let client = client.clone();
+        let sent_tx = sent_tx.clone();
+        let counts = Arc::clone(&counts);
+        let work_rx = Arc::clone(&work_rx);
+        workers.spawn(worker_loop(client, sent_tx, counts, work_rx));
+    }
+    workers
 }
 
-async fn process_unit(
+async fn worker_loop(
     mut client: GrpcClient,
     sent_tx: mpsc::UnboundedSender<SentNotice>,
     counts: Arc<DispatchCounts>,
+    work_rx: Arc<Mutex<mpsc::Receiver<WorkUnit>>>,
+) {
+    loop {
+        let unit = {
+            let mut receiver = work_rx.lock().await;
+            receiver.recv().await
+        };
+
+        let Some(unit) = unit else {
+            break;
+        };
+
+        process_unit(&mut client, &sent_tx, &counts, unit.symbol, unit.commands).await;
+    }
+}
+
+async fn process_unit(
+    client: &mut GrpcClient,
+    sent_tx: &mpsc::UnboundedSender<SentNotice>,
+    counts: &DispatchCounts,
     symbol: String,
     commands: Vec<EngineCommand>,
 ) {
@@ -172,7 +245,7 @@ async fn process_unit(
         let order_id = command.order_id().to_string();
         let at = Instant::now();
 
-        match client::send(&mut client, &symbol, &command).await {
+        match client::send(client, &symbol, &command).await {
             SendOutcome::Submitted => {
                 counts.accepted.fetch_add(1, Ordering::Relaxed);
                 let _ = sent_tx.send(SentNotice { order_id, at });
@@ -187,12 +260,6 @@ async fn process_unit(
                 counts.error.fetch_add(1, Ordering::Relaxed);
             }
         }
-    }
-}
-
-async fn bound_concurrency(set: &mut JoinSet<()>, limit: usize) {
-    while set.len() >= limit {
-        set.join_next().await;
     }
 }
 
