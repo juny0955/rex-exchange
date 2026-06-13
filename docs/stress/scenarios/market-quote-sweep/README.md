@@ -14,4 +14,4 @@
 | 측정 | 최신 상태 | 요약 |
 | --- | --- | --- |
 | Runtime | [2026-06-13 baseline](./runtime/measurements/2026-06-13_baseline.md) | 안정 120,000 TPS, 초과 150,000+ TPS |
-| Integration | 미측정 | 로컬 Docker 환경에서 첫 E2E 측정 후 `integration/measurements/`와 `integration/raw/`에 기록 |
+| Integration | [2026-06-13 baseline](./integration/measurements/2026-06-13_baseline.md) | 안전 80,000 TPS, 경계 100,000 TPS, 포화 130,000+ |

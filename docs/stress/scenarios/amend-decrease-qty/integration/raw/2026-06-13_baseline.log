@@ -1,0 +1,324 @@
+ Container rustex-kafka  Running
+ Container rustex-matching-engine  Running
+ Container rustex-kafka  Waiting
+ Container rustex-kafka  Healthy
+================================
+gRPC + Kafka 통합 부하 테스트 결과
+================================
+
+[실행 조건]
+  시나리오                        : 수량 감소 정정 (amend-decrease-qty)
+  실행 모드                       : paced (target=30,000/s, duration=30.000s, warmup=5.000s)
+  심볼 수                        : 1
+  스윕 깊이                       : 10
+  동시 실행(units)                : 512
+  gRPC 연결 수(connections)      : 16
+  gRPC 엔드포인트                  : http://matching-engine:50051
+  Kafka 브로커                   : kafka:9092
+  Kafka 토픽                    : matching-engine-events
+  settle 제한 시간                : 15s
+
+[gRPC 접수]
+  시도한 명령 수                    : 899,961
+  접수 성공(SUBMITTED)            : 572,749
+  채널 포화(503)                  : 327,212
+  거부(REJECTED)                : 0
+  기타 에러                       : 0
+  접수 성공률                      : 63.64%
+  목표 명령 수                     : 900,000
+  실제 시도율                      : 29996.7/s
+  target 달성률                  : 100.00%
+  target 달성 여부                : 예
+  pacing 지연 횟수                : 280,871
+  pacing 지연 누적                : 290.284s
+  pacing 최대 지연                : 6ms
+
+[Kafka 수신 / 정합성]
+  송신 알림 처리                    : 572,749
+  수신 이벤트(중복 포함)               : 572,749
+  고유 이벤트                      : 572,749
+  상관 매칭                       : 572,749
+  누락(접수했으나 미수신)               : 0
+  중복 수신                       : 0
+  미상관 수신                      : 0
+  settle 완료                   : 예
+  무손실 판정                      : 통과 (누락·중복 없음)
+
+[gRPC ack 지연 (T2-T1: 송신→SUBMITTED)]
+  표본 수                        : 572,749
+  min                         : 40µs
+  p50                         : 333µs
+  p90                         : 11.401ms
+  p99                         : 36.016ms
+  p99.9                       : 41.734ms
+  max                         : 52.260ms
+  mean                        : 3.066ms
+
+[post-ack 지연 (T3-T2: SUBMITTED→Kafka)]
+  표본 수                        : 572,749
+  min                         : 756µs
+  p50                         : 67.320ms
+  p90                         : 74.309ms
+  p99                         : 79.418ms
+  p99.9                       : 91.118ms
+  max                         : 103.677ms
+  mean                        : 55.132ms
+
+[E2E 지연 (T3-T1: 송신→Kafka)]
+  표본 수                        : 572,749
+  min                         : 1.350ms
+  p50                         : 68.687ms
+  p90                         : 74.871ms
+  p99                         : 80.060ms
+  p99.9                       : 91.385ms
+  max                         : 103.966ms
+  mean                        : 58.199ms
+
+[처리량]
+  접수 소요 시간                    : 30.002s
+  전체 소요 시간(접수+settle)         : 30.095s
+  초당 접수 성공 수                  : 19090.4/s
+  초당 종단 수신 수(E2E)             : 19031.7/s
+ Container rustex-kafka  Running
+ Container rustex-matching-engine  Running
+ Container rustex-kafka  Waiting
+ Container rustex-kafka  Healthy
+================================
+gRPC + Kafka 통합 부하 테스트 결과
+================================
+
+[실행 조건]
+  시나리오                        : 수량 감소 정정 (amend-decrease-qty)
+  실행 모드                       : paced (target=15,000/s, duration=30.000s, warmup=5.000s)
+  심볼 수                        : 1
+  스윕 깊이                       : 10
+  동시 실행(units)                : 512
+  gRPC 연결 수(connections)      : 16
+  gRPC 엔드포인트                  : http://matching-engine:50051
+  Kafka 브로커                   : kafka:9092
+  Kafka 토픽                    : matching-engine-events
+  settle 제한 시간                : 15s
+
+[gRPC 접수]
+  시도한 명령 수                    : 449,979
+  접수 성공(SUBMITTED)            : 449,979
+  채널 포화(503)                  : 0
+  거부(REJECTED)                : 0
+  기타 에러                       : 0
+  접수 성공률                      : 100.00%
+  목표 명령 수                     : 450,000
+  실제 시도율                      : 14998.3/s
+  target 달성률                  : 100.00%
+  target 달성 여부                : 예
+  pacing 지연 횟수                : 134,185
+  pacing 지연 누적                : 146.154s
+  pacing 최대 지연                : 3ms
+
+[Kafka 수신 / 정합성]
+  송신 알림 처리                    : 449,979
+  수신 이벤트(중복 포함)               : 449,979
+  고유 이벤트                      : 449,979
+  상관 매칭                       : 449,979
+  누락(접수했으나 미수신)               : 0
+  중복 수신                       : 0
+  미상관 수신                      : 0
+  settle 완료                   : 예
+  무손실 판정                      : 통과 (누락·중복 없음)
+
+[gRPC ack 지연 (T2-T1: 송신→SUBMITTED)]
+  표본 수                        : 449,979
+  min                         : 38µs
+  p50                         : 200µs
+  p90                         : 349µs
+  p99                         : 649µs
+  p99.9                       : 1.453ms
+  max                         : 3.358ms
+  mean                        : 225µs
+
+[post-ack 지연 (T3-T2: SUBMITTED→Kafka)]
+  표본 수                        : 449,979
+  min                         : 0µs
+  p50                         : 3.764ms
+  p90                         : 6.121ms
+  p99                         : 7.408ms
+  p99.9                       : 13.316ms
+  max                         : 18.819ms
+  mean                        : 3.944ms
+
+[E2E 지연 (T3-T1: 송신→Kafka)]
+  표본 수                        : 449,979
+  min                         : 454µs
+  p50                         : 3.980ms
+  p90                         : 6.363ms
+  p99                         : 7.689ms
+  p99.9                       : 13.497ms
+  max                         : 19.048ms
+  mean                        : 4.170ms
+
+[처리량]
+  접수 소요 시간                    : 30.002s
+  전체 소요 시간(접수+settle)         : 30.020s
+  초당 접수 성공 수                  : 14998.3/s
+  초당 종단 수신 수(E2E)             : 14989.4/s
+ Container rustex-kafka  Running
+ Container rustex-matching-engine  Running
+ Container rustex-kafka  Waiting
+ Container rustex-kafka  Healthy
+================================
+gRPC + Kafka 통합 부하 테스트 결과
+================================
+
+[실행 조건]
+  시나리오                        : 수량 감소 정정 (amend-decrease-qty)
+  실행 모드                       : paced (target=20,000/s, duration=30.000s, warmup=5.000s)
+  심볼 수                        : 1
+  스윕 깊이                       : 10
+  동시 실행(units)                : 512
+  gRPC 연결 수(connections)      : 16
+  gRPC 엔드포인트                  : http://matching-engine:50051
+  Kafka 브로커                   : kafka:9092
+  Kafka 토픽                    : matching-engine-events
+  settle 제한 시간                : 15s
+
+[gRPC 접수]
+  시도한 명령 수                    : 599,979
+  접수 성공(SUBMITTED)            : 599,979
+  채널 포화(503)                  : 0
+  거부(REJECTED)                : 0
+  기타 에러                       : 0
+  접수 성공률                      : 100.00%
+  목표 명령 수                     : 600,000
+  실제 시도율                      : 19997.6/s
+  target 달성률                  : 100.00%
+  target 달성 여부                : 예
+  pacing 지연 횟수                : 183,327
+  pacing 지연 누적                : 200.398s
+  pacing 최대 지연                : 3ms
+
+[Kafka 수신 / 정합성]
+  송신 알림 처리                    : 599,979
+  수신 이벤트(중복 포함)               : 599,979
+  고유 이벤트                      : 599,979
+  상관 매칭                       : 599,979
+  누락(접수했으나 미수신)               : 0
+  중복 수신                       : 0
+  미상관 수신                      : 0
+  settle 완료                   : 예
+  무손실 판정                      : 통과 (누락·중복 없음)
+
+[gRPC ack 지연 (T2-T1: 송신→SUBMITTED)]
+  표본 수                        : 599,979
+  min                         : 35µs
+  p50                         : 216µs
+  p90                         : 373µs
+  p99                         : 687µs
+  p99.9                       : 2.492ms
+  max                         : 10.857ms
+  mean                        : 246µs
+
+[post-ack 지연 (T3-T2: SUBMITTED→Kafka)]
+  표본 수                        : 599,979
+  min                         : 0µs
+  p50                         : 4.005ms
+  p90                         : 6.178ms
+  p99                         : 7.910ms
+  p99.9                       : 23.153ms
+  max                         : 43.391ms
+  mean                        : 4.117ms
+
+[E2E 지연 (T3-T1: 송신→Kafka)]
+  표본 수                        : 599,979
+  min                         : 551µs
+  p50                         : 4.235ms
+  p90                         : 6.443ms
+  p99                         : 8.294ms
+  p99.9                       : 23.359ms
+  max                         : 43.623ms
+  mean                        : 4.364ms
+
+[처리량]
+  접수 소요 시간                    : 30.003s
+  전체 소요 시간(접수+settle)         : 30.017s
+  초당 접수 성공 수                  : 19997.6/s
+  초당 종단 수신 수(E2E)             : 19988.0/s
+ Container rustex-kafka  Running
+ Container rustex-matching-engine  Running
+ Container rustex-kafka  Waiting
+ Container rustex-kafka  Healthy
+================================
+gRPC + Kafka 통합 부하 테스트 결과
+================================
+
+[실행 조건]
+  시나리오                        : 수량 감소 정정 (amend-decrease-qty)
+  실행 모드                       : paced (target=25,000/s, duration=30.000s, warmup=5.000s)
+  심볼 수                        : 1
+  스윕 깊이                       : 10
+  동시 실행(units)                : 512
+  gRPC 연결 수(connections)      : 16
+  gRPC 엔드포인트                  : http://matching-engine:50051
+  Kafka 브로커                   : kafka:9092
+  Kafka 토픽                    : matching-engine-events
+  settle 제한 시간                : 15s
+
+[gRPC 접수]
+  시도한 명령 수                    : 749,985
+  접수 성공(SUBMITTED)            : 640,771
+  채널 포화(503)                  : 109,214
+  거부(REJECTED)                : 0
+  기타 에러                       : 0
+  접수 성공률                      : 85.44%
+  목표 명령 수                     : 750,000
+  실제 시도율                      : 24997.4/s
+  target 달성률                  : 100.00%
+  target 달성 여부                : 예
+  pacing 지연 횟수                : 232,426
+  pacing 지연 누적                : 244.653s
+  pacing 최대 지연                : 5ms
+
+[Kafka 수신 / 정합성]
+  송신 알림 처리                    : 640,771
+  수신 이벤트(중복 포함)               : 640,771
+  고유 이벤트                      : 640,771
+  상관 매칭                       : 640,771
+  누락(접수했으나 미수신)               : 0
+  중복 수신                       : 0
+  미상관 수신                      : 0
+  settle 완료                   : 예
+  무손실 판정                      : 통과 (누락·중복 없음)
+
+[gRPC ack 지연 (T2-T1: 송신→SUBMITTED)]
+  표본 수                        : 640,771
+  min                         : 52µs
+  p50                         : 365µs
+  p90                         : 22.985ms
+  p99                         : 32.497ms
+  p99.9                       : 38.591ms
+  max                         : 49.998ms
+  mean                        : 4.880ms
+
+[post-ack 지연 (T3-T2: SUBMITTED→Kafka)]
+  표본 수                        : 640,771
+  min                         : 395µs
+  p50                         : 33.339ms
+  p90                         : 58.817ms
+  p99                         : 66.183ms
+  p99.9                       : 76.044ms
+  max                         : 83.952ms
+  mean                        : 39.056ms
+
+[E2E 지연 (T3-T1: 송신→Kafka)]
+  표본 수                        : 640,771
+  min                         : 592µs
+  p50                         : 43.743ms
+  p90                         : 59.974ms
+  p99                         : 67.747ms
+  p99.9                       : 78.065ms
+  max                         : 84.634ms
+  mean                        : 43.936ms
+
+[처리량]
+  접수 소요 시간                    : 30.003s
+  전체 소요 시간(접수+settle)         : 30.079s
+  초당 접수 성공 수                  : 21357.2/s
+  초당 종단 수신 수(E2E)             : 21302.9/s

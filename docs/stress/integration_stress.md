@@ -20,7 +20,7 @@ gRPC client -> :50051 tonic server -> EngineDispatcher -> MatchingEngine -> Kafk
 
 | 지표 | 설명 |
 | --- | --- |
-| E2E 지연 | gRPC 송신 시각부터 해당 order_id의 Kafka 이벤트 수신 시각까지. order_id로 상관(correlate)해 백분위로 집계 |
+| 지연(3단계 분해) | 한 명령의 생애를 T1(gRPC 송신)·T2(SUBMITTED 수신)·T3(Kafka 이벤트 수신)로 끊어 gRPC ack(T2−T1)·post-ack(T3−T2)·E2E(T3−T1)를 각각 백분위로 집계. order_id로 상관 |
 | 처리량 / 포화점 | gRPC→엔진→Kafka 전체 경로가 견디는 지속 가능 초당 명령 수와 한계점 |
 | 무손실 / 정합성 | 접수(SUBMITTED)된 명령이 Kafka에 정확히 1건씩 도착하는지(누락·중복) |
 | 백프레셔 | 고부하 시 gRPC 503(RESOURCE_EXHAUSTED = 엔진 채널 포화) 발생 비율 |
@@ -98,6 +98,7 @@ docker compose run --rm integration-stress --grpc-endpoint http://matching-engin
 | `--symbols` | `1` | 생성할 심볼 수. 심볼별 engine thread가 생성된다 |
 | `--sweep-depth` | `10` | 체결 시나리오에서 taker 1개가 sweep할 maker 주문 수 |
 | `--concurrency` | `64` | 워크로드 unit을 처리하는 고정 worker 수. 내부 queue capacity도 같은 값을 쓴다 |
+| `--connections` | `8` | gRPC 연결 풀 크기. worker가 연결을 round-robin으로 나눠 쓴다 |
 | `--timeout-sec` | `30` | (예약) 명령 처리 제한 시간 |
 | `--settle-timeout-sec` | `15` | 부하 종료 후 잔여 Kafka 이벤트 수신을 기다릴 최대 시간 |
 | `--grpc-endpoint` | `http://localhost:50051` | SUT gRPC 엔드포인트 |
@@ -105,7 +106,7 @@ docker compose run --rm integration-stress --grpc-endpoint http://matching-engin
 | `--kafka-topic` | `matching-engine-events` | 구독할 결과 이벤트 토픽 |
 
 안전한 수동 실행을 위해 입력값에는 상한이 있다. `--orders`는 10,000,000 이하, `--symbols`는 1,024 이하,
-`--sweep-depth`는 10,000 이하, `--concurrency`는 8,192 이하,
+`--sweep-depth`는 10,000 이하, `--concurrency`는 8,192 이하, `--connections`는 1,024 이하,
 `--duration-sec`, `--warmup-sec`, `--timeout-sec`, `--settle-timeout-sec`는 86,400초 이하,
 `--target-commands-per-sec`는 1,000,000 이하로 제한한다.
 
@@ -122,8 +123,22 @@ unit 하나는 한 번의 워크로드 반복이 만든 command 묶음이다(예
 
 - unit **내부** command는 직렬로 전송한다. place를 보낸 뒤 응답을 받고 cancel/amend를 보내므로,
   같은 심볼 큐에 place가 먼저 들어가 의존성 순서(place → cancel/amend)가 보존된다.
+- unit 하나는 **batch RPC(`SubmitBatch`) 1콜**로 전송한다. unit 내부 명령은 batch 안에서 입력 순서대로
+  서버가 dispatch하므로 의존성 순서(place → cancel/amend)가 보존된다. 콜당 고정비(HTTP/2 스트림/HPACK/
+  응답 인코드)를 분산해 서버 gRPC ingress CPU를 줄이는 것이 목적이다. ack 지연(T2−T1)은 명령별이 아니라
+  **batch 왕복** 단위로 측정된다.
 - unit **간**에는 worker 수만큼 병렬로 실행한다.
 - producer가 queue에 unit을 넣는 속도가 worker 처리 속도를 넘으면 queue backpressure가 걸리고, 이 지연은 pacing 지표에 반영된다.
+
+### gRPC 연결 풀
+
+tonic `Channel`은 clone해도 동일한 HTTP/2 연결 1개를 공유한다. 따라서 worker만 늘리면
+모든 명령이 단일 연결에서 멀티플렉싱되어, 그 연결의 동시 스트림 한도·단일 소켓 처리량에
+막혀 `--concurrency`를 올려도 throughput이 더 늘지 않는다.
+
+`--connections N`은 독립 연결 N개로 풀을 만들고, worker `i`는 `pool[i % N]`을 사용한다.
+높은 `--target-commands-per-sec`를 실제로 달성하려면 worker 수뿐 아니라 연결 수도 함께
+늘려야 한다(엔진/네트워크가 받아낼 수 있는 한도까지).
 
 따라서 단일 심볼이라도 unit 간 병렬성으로 처리량을 올릴 수 있고, 같은 order_id가 재사용되는 시나리오에서도
 이벤트가 명령 순서대로 발행된다. 상관 집계는 order_id별 FIFO로 송신↔수신을 매칭한다.
@@ -201,7 +216,7 @@ docker compose run --rm integration-stress --grpc-endpoint http://matching-engin
 
 ## 결과 해석
 
-출력은 `[gRPC 접수]`, `[Kafka 수신 / 정합성]`, `[E2E 지연]`, `[처리량]` 네 섹션으로 나뉜다.
+출력은 `[gRPC 접수]`, `[Kafka 수신 / 정합성]`, `[gRPC ack 지연]`, `[post-ack 지연]`, `[E2E 지연]`, `[처리량]` 섹션으로 나뉜다.
 
 | 출력 항목 | 해석 |
 | --- | --- |
@@ -224,7 +239,9 @@ docker compose run --rm integration-stress --grpc-endpoint http://matching-engin
 | `미상관 수신` | 대응 송신을 찾지 못한 수신 수. `latest` 오프셋에서는 0이어야 한다 |
 | `settle 완료` | 제한 시간 안에 송신 알림과 Kafka 이벤트가 접수 성공 수만큼 상관 처리됐는지 여부 |
 | `무손실 판정` | settle 완료 + 송신 알림 처리 = 접수 성공 + 상관 매칭 = 접수 성공 + 누락·중복·미상관 0 + 고유 이벤트 = 접수 성공일 때 통과 |
-| `E2E 지연 p50/p99/max` | gRPC 송신부터 Kafka 수신까지 종단 지연 분포 |
+| `gRPC ack 지연 p50/p99/max` | T2−T1: 송신부터 SUBMITTED 응답까지. 부하생성기/gRPC client/tonic server/dispatcher 구간 |
+| `post-ack 지연 p50/p99/max` | T3−T2: SUBMITTED 이후 Kafka 이벤트 수신까지. engine 처리/result handler/Kafka producer/broker/consumer 구간 |
+| `E2E 지연 p50/p99/max` | T3−T1: 송신부터 Kafka 수신까지 전체 종단 지연 |
 | `초당 접수 성공 수` | 접수(dispatch) 구간 기준 처리량 |
 | `초당 종단 수신 수(E2E)` | 접수+settle 전체 구간 기준 종단 처리량 |
 
@@ -234,7 +251,14 @@ docker compose run --rm integration-stress --grpc-endpoint http://matching-engin
 - `target 달성 여부 = 아니오`이면 SUT가 해당 target을 안정 처리했다고 보지 않고, 부하 생성기/gRPC client 쪽 유입 한계를 먼저 확인한다.
 - `채널 포화(503)`가 증가하면 gRPC가 받아낸 속도를 엔진이 소비하지 못하는 백프레셔 신호다.
 - `누락`이 발생하거나 `settle 완료 = 아니오`면 포화 부근에서 발행이 밀리거나 손실이 있는지 확인한다.
-- `E2E 지연 p99`가 부하와 무관하게 일정하게 높으면 Kafka publish 경로(producer 배칭/poll cadence, broker)를 의심한다.
+- **병목 위치는 ack vs post-ack 분해로 특정한다**:
+
+  | 결과 | 병목 위치 |
+  | --- | --- |
+  | gRPC ack가 큼 | 부하생성기 / gRPC client / tonic server / dispatcher |
+  | post-ack가 큼 | engine 이후 / result handler / Kafka producer / broker / consumer |
+  | 둘 다 큼 | CPU 포화 또는 전체 큐잉 |
+
 - 절대 수치보다 유입률 단계별 추세와 포화점 위치로 해석한다(아래 주의 참고).
 
 ## 주의

@@ -72,6 +72,26 @@ Runtime stress와 Integration stress의 공식 기준선과 개선 비교는 로
 | `amend-decrease-qty` | [2026-06-13 baseline](./scenarios/amend-decrease-qty/runtime/measurements/2026-06-13_baseline.md) | 130,000 | 140,000 | 250,000+ | 140,000부터 channel full 발생 | [raw](./scenarios/amend-decrease-qty/runtime/raw/2026-06-13_baseline.log) |
 | `amend-price-change` | [2026-06-13 baseline](./scenarios/amend-price-change/runtime/measurements/2026-06-13_baseline.md) | 130,000 | 140,000 | 150,000+ | 140,000부터 channel full 발생 | [raw](./scenarios/amend-price-change/runtime/raw/2026-06-13_baseline.log) |
 
+### 최신 Integration TPS 요약 (gRPC + Kafka)
+
+`integration_stress`를 통해 측정한 종단(E2E) 성능 결과다. 전송은 모두 `SubmitBatch`(unit 전체를 batch RPC 1콜로 전송)를 사용한다.
+**안전**은 `채널 포화(503) = 0` 또는 무시 가능한 수준이고 `target 달성률 ~= 100%`인 구간, **경계**는 `target 달성률`은 유지되지만 503 비율 또는 ack/E2E p99 지연이 급증하는 구간, **포화**는 503 비율이 두 자릿수%대이거나 `target 달성률`이 100% 미달인 구간을 가리킨다. 각 시나리오의 판정 근거는 해당 측정 문서의 "판정" 절을 따른다.
+
+| 시나리오 | 최신 측정 | commands/unit | 안전 TPS | 경계 TPS | 포화 TPS | p99 지연(E2E, 안전) | 무손실 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| `full-fill-same-level` | [2026-06-13 baseline](./scenarios/full-fill-same-level/integration/measurements/2026-06-13_baseline.md) | 11 | 100,000 | 120,000 | 150,000+ | 22.910ms | 통과 |
+| `market-quote-sweep` | [2026-06-13 baseline](./scenarios/market-quote-sweep/integration/measurements/2026-06-13_baseline.md) | 11 | 80,000 | 100,000 | 130,000+ | 14.511ms | 통과(≤100k) / 실패(130k) |
+| `partial-fill-rest` | [2026-06-13 baseline](./scenarios/partial-fill-rest/integration/measurements/2026-06-13_baseline.md) | 11 | 100,000 | 120,000 | 150,000+ | 21.174ms | 통과 |
+| `place-resting-limit` | [2026-06-13 baseline](./scenarios/place-resting-limit/integration/measurements/2026-06-13_baseline.md) | 1 | 25,000 | 40,000 | 50,000+ | 8.281ms | 통과 |
+| `cancel-resting-order` | [2026-06-13 baseline](./scenarios/cancel-resting-order/integration/measurements/2026-06-13_baseline.md) | 20 | 10,000 | 15,000 | 30,000+ | 8.777ms | 통과 |
+| `amend-decrease-qty` | [2026-06-13 baseline](./scenarios/amend-decrease-qty/integration/measurements/2026-06-13_baseline.md) | 3 | 20,000 | 25,000 | 30,000+ | 8.294ms | 통과 |
+| `amend-price-change` | [2026-06-13 baseline](./scenarios/amend-price-change/integration/measurements/2026-06-13_baseline.md) | 3 | 5,000 | 10,000 | 20,000+ | 8.113ms | 통과 |
+
+- commands/unit=11(`full-fill-same-level`, `market-quote-sweep`, `partial-fill-rest`)이 batch RPC 효과를 가장 크게 받아 안전 TPS가 80k~100k로 가장 높다.
+- commands/unit=1(`place-resting-limit`)은 batch RPC가 RPC 콜 수를 줄이지 못해 안전 TPS가 25,000에 그치고, 포화도 503이 아닌 target 미달성(pacing 지연) 형태로 나타난다.
+- commands/unit=20(`cancel-resting-order`)은 batch RPC 콜 절감 효과는 가장 크지만 단일 RPC가 채널에 던지는 명령 burst(512 units × 20)도 가장 커서 안전 TPS가 가장 낮다(10,000).
+- commands/unit=3인 `amend-decrease-qty`(안전 20,000)와 `amend-price-change`(안전 5,000)는 commands/unit이 같아도 엔진 처리 비용(in-place 수량 갱신 vs cancel-replace 가격 레벨 이동) 차이로 안전선이 약 4배 차이난다.
+
 ## 운영 규칙
 
 - 새 측정은 [Stress 시나리오](./scenarios/README.md)의 구조에 맞춰 추가한다.
