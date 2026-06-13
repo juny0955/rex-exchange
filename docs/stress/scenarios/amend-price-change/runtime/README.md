@@ -11,13 +11,15 @@ Place/Amend/Cancel 3-command 묶음으로 구성되어 반복 종료 시 orderbo
 
 ## 최신 TPS
 
+## 최신 TPS
+
 | 항목 | 값 |
 | --- | --- |
-| 최신 안정 TPS | 미측정 |
-| 경계 TPS | 미측정 |
-| 초과 구간 | 미측정 |
+| 최신 안정 TPS | `130,000` |
+| 경계 TPS | `140,000` |
+| 초과 구간 | `150,000+` |
 
-로컬 Docker 환경에서 새 측정을 진행한 뒤 이 표를 갱신한다.
+최신 기준선은 [2026-06-13 baseline](./measurements/2026-06-13_baseline.md)이다.
 
 ## 고정 실행 조건
 
@@ -31,8 +33,6 @@ Place/Amend/Cancel 3-command 묶음으로 구성되어 반복 종료 시 orderbo
 | 제한 시간 | `30s` |
 | 실행 모드 | `paced` |
 
-`sweep-depth`는 출력에는 표시되지만 이 시나리오의 workload 생성에는 사용되지 않는다.
-
 대표 실행 명령:
 
 ```bash
@@ -43,6 +43,7 @@ docker compose run --rm runtime-stress --scenario amend-price-change --warmup-se
 
 | 측정 | 안정 TPS | 경계 TPS | raw |
 | --- | ---: | ---: | --- |
-| 미측정 | - | - | - |
+| [2026-06-13 baseline](./measurements/2026-06-13_baseline.md) | 130,000 | 140,000 | [raw](./raw/2026-06-13_baseline.log) |
+
 
 새 측정 결과가 생기면 `measurements/`와 `raw/`에 같은 날짜/목적 이름으로 파일을 추가하고 이 표를 갱신한다.

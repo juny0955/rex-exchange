@@ -44,6 +44,10 @@ Runtime stress와 Integration stress의 공식 기준선과 개선 비교는 로
 | --- | --- |
 | Runtime | repo 루트 `Dockerfile`의 `runtime-stress` target |
 | Runtime resource limit | CPU 1, memory 1GB, swap 1GB |
+| Local host | MacBook Pro Mac16,8, Apple M4 Pro 12-core CPU(8P+4E), memory 24GB |
+| Host OS | macOS 26.3.1(a), build 25D771280a |
+| Docker Desktop | Docker 27.3.1, Linux arm64/aarch64, cgroup v2, overlay2 |
+| Docker VM allocation | 8 CPUs, 4,109,737,984 bytes memory |
 | Integration Kafka | repo 루트 `docker-compose.yml`의 `kafka` service |
 | Integration Kafka resource limit | CPU 2, memory 2GB, swap 2GB |
 | Integration SUT | repo 루트 `docker-compose.yml`의 `matching-engine` service |
@@ -60,18 +64,18 @@ Runtime stress와 Integration stress의 공식 기준선과 개선 비교는 로
 
 | 시나리오 | 최신 측정 | 최신 안정 TPS | 경계 TPS | 초과 구간 | 요약 | raw |
 | --- | --- | ---: | ---: | --- | --- | --- |
-| `full-fill-same-level` | 미측정 | - | - | - | - | - |
-| `market-quote-sweep` | 미측정 | - | - | - | - | - |
-| `partial-fill-rest` | 미측정 | - | - | - | - | - |
-| `place-resting-limit` | 미측정 | - | - | - | - | - |
-| `cancel-resting-order` | 미측정 | - | - | - | - | - |
-| `amend-decrease-qty` | 미측정 | - | - | - | - | - |
-| `amend-price-change` | 미측정 | - | - | - | - | - |
+| `full-fill-same-level` | [2026-06-13 baseline](./scenarios/full-fill-same-level/runtime/measurements/2026-06-13_baseline.md) | 100,000 | - | 120,000+ | 120,000부터 channel full 발생 | [raw](./scenarios/full-fill-same-level/runtime/raw/2026-06-13_baseline.log) |
+| `market-quote-sweep` | [2026-06-13 baseline](./scenarios/market-quote-sweep/runtime/measurements/2026-06-13_baseline.md) | 120,000 | - | 150,000+ | 150,000부터 channel full 발생 | [raw](./scenarios/market-quote-sweep/runtime/raw/2026-06-13_baseline.log) |
+| `partial-fill-rest` | [2026-06-13 baseline](./scenarios/partial-fill-rest/runtime/measurements/2026-06-13_baseline.md) | 100,000 | 110,000 | 120,000+ | 110,000부터 channel full 발생 | [raw](./scenarios/partial-fill-rest/runtime/raw/2026-06-13_baseline.log) |
+| `place-resting-limit` | [2026-06-13 baseline](./scenarios/place-resting-limit/runtime/measurements/2026-06-13_baseline.md) | 20,000 | 30,000 | 50,000+ | 30,000부터 channel full 발생 | [raw](./scenarios/place-resting-limit/runtime/raw/2026-06-13_baseline.log) |
+| `cancel-resting-order` | [2026-06-13 baseline](./scenarios/cancel-resting-order/runtime/measurements/2026-06-13_baseline.md) | 90,000 | 100,000 | 200,000+ | 100,000부터 channel full 발생 | [raw](./scenarios/cancel-resting-order/runtime/raw/2026-06-13_baseline.log) |
+| `amend-decrease-qty` | [2026-06-13 baseline](./scenarios/amend-decrease-qty/runtime/measurements/2026-06-13_baseline.md) | 130,000 | 140,000 | 250,000+ | 140,000부터 channel full 발생 | [raw](./scenarios/amend-decrease-qty/runtime/raw/2026-06-13_baseline.log) |
+| `amend-price-change` | [2026-06-13 baseline](./scenarios/amend-price-change/runtime/measurements/2026-06-13_baseline.md) | 130,000 | 140,000 | 150,000+ | 140,000부터 channel full 발생 | [raw](./scenarios/amend-price-change/runtime/raw/2026-06-13_baseline.log) |
 
 ## 운영 규칙
 
 - 새 측정은 [Stress 시나리오](./scenarios/README.md)의 구조에 맞춰 추가한다.
-- 측정 문서에는 로컬 Docker 환경과 실행 옵션을 함께 기록한다.
+- 측정 문서에는 로컬 호스트 스펙, Docker VM 할당, Docker 리소스 제한, 실행 옵션을 함께 기록한다.
 - 개선 후 측정은 새 문서로 추가하고, 기준선 대비 변화율을 기록한다.
 - Runtime 측정의 `완료 여부 = 예`는 접수된 command만 완료됐다는 뜻이며, 거부된 command까지 처리됐다는 뜻이 아니다.
 - Integration 측정의 `무손실 판정 = 통과`는 접수 성공한 명령이 Kafka 이벤트로 정확히 한 번 수신됐다는 뜻이다.
