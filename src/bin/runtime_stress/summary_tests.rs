@@ -2,9 +2,10 @@ use std::time::Duration;
 
 use crate::runtime_stress::{
     config::{Config, RunMode},
+    latency::LatencySummary,
     stats::{DispatchStats, PhaseStats, ResultStatsSnapshot},
     summary::{render_burst_summary, render_paced_summary},
-    summary_format::{completion_label, format_count, format_duration_display},
+    summary_format::{completion_label, format_count, format_duration_display, format_micros},
 };
 
 #[test]
@@ -18,6 +19,13 @@ fn format_count_uses_thousands_separator() {
     assert_eq!(format_count(0), "0");
     assert_eq!(format_count(1_000), "1,000");
     assert_eq!(format_count(1_234_567), "1,234,567");
+}
+
+#[test]
+fn format_micros_uses_us_ms_or_seconds() {
+    assert_eq!(format_micros(999), "999µs");
+    assert_eq!(format_micros(1_500), "1.500ms");
+    assert_eq!(format_micros(2_345_678), "2.346s");
 }
 
 #[test]
@@ -59,6 +67,15 @@ fn render_burst_summary_groups_results_into_readable_sections() {
         total_elapsed: Duration::from_micros(456_789),
         pacing_lag_events: 0,
         pacing_lag: Duration::ZERO,
+        latency: LatencySummary {
+            count: 1_100_000,
+            min_us: 12,
+            mean_us: 870,
+            p50_us: 800,
+            p95_us: 1_500,
+            p99_us: 2_300,
+            max_us: 9_100,
+        },
     };
 
     let output = render_burst_summary(&config, 100_000, &result);
@@ -73,6 +90,12 @@ fn render_burst_summary_groups_results_into_readable_sections() {
     assert!(output.contains("시도한 명령 수     1,100,000"));
     assert!(output.contains("접수 소요 시간     123.456ms"));
     assert!(output.contains("초당 접수 성공 수  "));
+    assert!(output.contains("[지연 분포]"));
+    assert!(output.contains("지연 표본 수       1,100,000"));
+    assert!(output.contains("지연 p50           800µs"));
+    assert!(output.contains("지연 p95           1.500ms"));
+    assert!(output.contains("지연 p99           2.300ms"));
+    assert!(output.contains("지연 max           9.100ms"));
 }
 
 #[test]
@@ -106,4 +129,5 @@ fn render_paced_summary_splits_warmup_and_measurement() {
     assert!(output.contains("[warm-up 결과]"));
     assert!(output.contains("[측정 결과]"));
     assert!(output.contains("목표 명령 수/s     100"));
+    assert!(output.contains("측정된 지연 표본이 없습니다"));
 }

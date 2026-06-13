@@ -63,6 +63,16 @@ pub(super) fn format_duration_display(duration: Duration) -> String {
     }
 }
 
+pub(super) fn format_micros(us: u64) -> String {
+    if us >= 1_000_000 {
+        format!("{:.3}s", us as f64 / 1_000_000.0)
+    } else if us >= 1_000 {
+        format!("{:.3}ms", us as f64 / 1_000.0)
+    } else {
+        format!("{us}µs")
+    }
+}
+
 pub(super) fn format_rate(value: f64) -> String {
     let raw = format!("{value:.2}");
     let Some((whole, fraction)) = raw.split_once('.') else {

@@ -10,6 +10,16 @@ pub enum EngineResult {
     Amend(AmendOrderResult),
 }
 
+impl EngineResult {
+    pub fn order_id(&self) -> Uuid {
+        match self {
+            EngineResult::Place(r) => r.taker_order_id,
+            EngineResult::Cancel(r) => r.order_id,
+            EngineResult::Amend(r) => r.order_id,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PlaceOrderResult {
     pub symbol: String,

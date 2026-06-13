@@ -2,10 +2,11 @@ use std::time::Duration;
 
 use crate::runtime_stress::{
     config::Config,
+    latency::LatencySummary,
     stats::PhaseStats,
     summary_format::{
-        completion_label, format_count, format_duration_display, format_rate, per_sec, percentage,
-        push_row,
+        completion_label, format_count, format_duration_display, format_micros, format_rate,
+        per_sec, percentage, push_row,
     },
 };
 
@@ -151,6 +152,10 @@ fn push_phase_sections(output: &mut String, result: &PhaseStats) {
 
     output.push_str("[처리량]\n");
     push_throughput_rows(output, result);
+    output.push('\n');
+
+    output.push_str("[지연 분포]\n");
+    push_latency_rows(output, &result.latency);
 }
 
 fn push_phase_body(output: &mut String, result: &PhaseStats) {
@@ -172,6 +177,26 @@ fn push_phase_body(output: &mut String, result: &PhaseStats) {
         "pacing 지연 합계",
         &format_duration_display(result.pacing_lag),
     );
+    push_latency_rows(output, &result.latency);
+}
+
+fn push_latency_rows(output: &mut String, latency: &LatencySummary) {
+    if latency.count == 0 {
+        output.push_str("  측정된 지연 표본이 없습니다\n");
+        return;
+    }
+
+    push_row(
+        output,
+        "지연 표본 수",
+        &format_count(latency.count as usize),
+    );
+    push_row(output, "지연 min", &format_micros(latency.min_us));
+    push_row(output, "지연 mean", &format_micros(latency.mean_us));
+    push_row(output, "지연 p50", &format_micros(latency.p50_us));
+    push_row(output, "지연 p95", &format_micros(latency.p95_us));
+    push_row(output, "지연 p99", &format_micros(latency.p99_us));
+    push_row(output, "지연 max", &format_micros(latency.max_us));
 }
 
 fn push_dispatch_rows(output: &mut String, result: &PhaseStats) {

@@ -1,4 +1,5 @@
 pub mod config;
+pub mod latency;
 pub mod publisher;
 pub mod runner;
 mod runner_dispatch;

@@ -8,6 +8,7 @@ use matching_engine::engine::runtime::EngineRuntime;
 
 use crate::runtime_stress::{
     config::{Config, RunMode, Scenario},
+    latency::LatencyTracker,
     publisher::CountingPublisher,
     runner_dispatch::{dispatch_command, dispatch_commands, wait_until_published},
     runner_pacing::{CommandCursor, command_interval},
@@ -19,11 +20,13 @@ use crate::runtime_stress::{
 pub fn run(config: Config) {
     let symbols = make_symbols(config.symbols);
     let result_stats = Arc::new(ResultStats::default());
+    let latency = LatencyTracker::new();
 
     let runtime = EngineRuntime::new(
         symbols.clone(),
         Box::new(CountingPublisher::new(
             Arc::clone(&result_stats),
+            latency.correlator(),
             config.publisher_delay,
         )),
     );
@@ -38,6 +41,7 @@ pub fn run(config: Config) {
                 &symbols,
                 &mut generator,
                 &result_stats,
+                &latency,
                 &config,
                 orders,
             );
@@ -50,15 +54,27 @@ pub fn run(config: Config) {
             target_commands_per_sec,
         } => {
             let mut cursor = CommandCursor::default();
-            let warmup_result = run_optional_warmup(
-                &dispatcher,
-                &symbols,
-                &mut cursor,
-                &result_stats,
-                &config,
-                warmup,
-                target_commands_per_sec,
-            );
+            let warmup_result = if warmup.is_zero() {
+                PhaseStats {
+                    completed: true,
+                    ..PhaseStats::default()
+                }
+            } else {
+                run_paced_phase(
+                    &dispatcher,
+                    &symbols,
+                    &mut cursor,
+                    &result_stats,
+                    &latency,
+                    PacedPhase {
+                        scenario: config.scenario,
+                        sweep_depth: config.sweep_depth,
+                        duration: warmup,
+                        target_commands_per_sec,
+                        timeout: config.timeout,
+                    },
+                )
+            };
 
             let measurement_result = if warmup_result.completed {
                 Some(run_paced_phase(
@@ -66,6 +82,7 @@ pub fn run(config: Config) {
                     &symbols,
                     &mut cursor,
                     &result_stats,
+                    &latency,
                     PacedPhase {
                         scenario: config.scenario,
                         sweep_depth: config.sweep_depth,
@@ -112,6 +129,7 @@ fn run_burst_phase(
     symbols: &[String],
     generator: &mut WorkloadGenerator,
     result_stats: &ResultStats,
+    latency: &LatencyTracker,
     config: &Config,
     orders: usize,
 ) -> PhaseStats {
@@ -125,7 +143,13 @@ fn run_burst_phase(
         let commands = generator.make_workload(config.scenario, config.sweep_depth, symbol);
         attempted_commands += commands.len();
 
-        dispatch_commands(dispatcher, symbol, commands, &mut dispatch);
+        dispatch_commands(
+            dispatcher,
+            symbol,
+            commands,
+            &mut dispatch,
+            latency.recorder(),
+        );
     }
 
     let dispatch_elapsed = started.elapsed();
@@ -145,38 +169,8 @@ fn run_burst_phase(
         total_elapsed,
         pacing_lag_events: 0,
         pacing_lag: Duration::ZERO,
+        latency: latency.take_summary(),
     }
-}
-
-fn run_optional_warmup(
-    dispatcher: &matching_engine::engine::dispatcher::EngineDispatcher,
-    symbols: &[String],
-    cursor: &mut CommandCursor,
-    result_stats: &ResultStats,
-    config: &Config,
-    warmup: Duration,
-    target_commands_per_sec: u64,
-) -> PhaseStats {
-    if warmup.is_zero() {
-        return PhaseStats {
-            completed: true,
-            ..PhaseStats::default()
-        };
-    }
-
-    run_paced_phase(
-        dispatcher,
-        symbols,
-        cursor,
-        result_stats,
-        PacedPhase {
-            scenario: config.scenario,
-            sweep_depth: config.sweep_depth,
-            duration: warmup,
-            target_commands_per_sec,
-            timeout: config.timeout,
-        },
-    )
 }
 
 fn run_paced_phase(
@@ -184,6 +178,7 @@ fn run_paced_phase(
     symbols: &[String],
     cursor: &mut CommandCursor,
     result_stats: &ResultStats,
+    latency: &LatencyTracker,
     phase: PacedPhase,
 ) -> PhaseStats {
     let baseline = result_stats.snapshot();
@@ -216,7 +211,13 @@ fn run_paced_phase(
         };
 
         attempted_commands += 1;
-        dispatch_command(dispatcher, &symbol, command, &mut dispatch);
+        dispatch_command(
+            dispatcher,
+            &symbol,
+            command,
+            &mut dispatch,
+            latency.recorder(),
+        );
         next_tick += interval;
     }
 
@@ -237,6 +238,7 @@ fn run_paced_phase(
         total_elapsed,
         pacing_lag_events,
         pacing_lag,
+        latency: latency.take_summary(),
     }
 }
 

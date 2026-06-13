@@ -4,6 +4,8 @@ use std::{
     time::Duration,
 };
 
+use crate::runtime_stress::latency::LatencySummary;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct DispatchStats {
     pub accepted: usize,
@@ -99,6 +101,7 @@ pub struct PhaseStats {
     pub total_elapsed: Duration,
     pub pacing_lag_events: usize,
     pub pacing_lag: Duration,
+    pub latency: LatencySummary,
 }
 
 #[cfg(test)]
