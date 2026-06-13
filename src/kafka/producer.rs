@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{env, time::Duration};
 
 use rdkafka::{
     ClientConfig, ClientContext, Message,
@@ -18,6 +18,37 @@ const BOOTSTRAP_SERVERS: &str = "localhost:9092";
 const TOPIC: &str = "matching-engine-events";
 const CLIENT_ID: &str = "matching-engine";
 const MESSAGE_TIMEOUT_MS: &str = "5000";
+const BROKERS_ENV: &str = "MATCHING_ENGINE_KAFKA_BROKERS";
+const TOPIC_ENV: &str = "MATCHING_ENGINE_KAFKA_TOPIC";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KafkaProducerConfig {
+    bootstrap_servers: String,
+    topic: String,
+}
+
+impl KafkaProducerConfig {
+    pub fn from_env() -> Self {
+        let brokers = env::var(BROKERS_ENV).ok();
+        let topic = env::var(TOPIC_ENV).ok();
+        Self::from_env_values(brokers.as_deref(), topic.as_deref())
+    }
+
+    pub fn from_env_values(brokers: Option<&str>, topic: Option<&str>) -> Self {
+        Self {
+            bootstrap_servers: brokers.unwrap_or(BOOTSTRAP_SERVERS).to_string(),
+            topic: topic.unwrap_or(TOPIC).to_string(),
+        }
+    }
+
+    pub fn bootstrap_servers(&self) -> &str {
+        &self.bootstrap_servers
+    }
+
+    pub fn topic(&self) -> &str {
+        &self.topic
+    }
+}
 
 #[derive(Debug)]
 struct DeliveryMeta {
@@ -59,6 +90,7 @@ impl ProducerContext for KafkaDeliveryContext {
 
 pub struct KafkaProducer {
     producer: ThreadedProducer<KafkaDeliveryContext>,
+    config: KafkaProducerConfig,
 }
 
 impl EngineResultPublisher for KafkaProducer {
@@ -71,15 +103,20 @@ impl EngineResultPublisher for KafkaProducer {
 
 impl KafkaProducer {
     pub fn new() -> Result<Self, KafkaProducerError> {
+        let config = KafkaProducerConfig::from_env();
+        Self::with_config(config)
+    }
+
+    fn with_config(config: KafkaProducerConfig) -> Result<Self, KafkaProducerError> {
         let producer = ClientConfig::new()
-            .set("bootstrap.servers", BOOTSTRAP_SERVERS)
+            .set("bootstrap.servers", config.bootstrap_servers())
             .set("client.id", CLIENT_ID)
             .set("message.timeout.ms", MESSAGE_TIMEOUT_MS)
             .set("acks", "all")
             .create_with_context(KafkaDeliveryContext)
             .map_err(KafkaProducerError::Create)?;
 
-        Ok(Self { producer })
+        Ok(Self { producer, config })
     }
 
     pub fn publish_event(&self, event: &MatchingEngineEvent) -> Result<(), KafkaProducerError> {
@@ -94,7 +131,7 @@ impl KafkaProducer {
         });
 
         let record: BaseRecord<'_, str, [u8], Box<DeliveryMeta>> =
-            BaseRecord::with_opaque_to(TOPIC, meta)
+            BaseRecord::with_opaque_to(self.config.topic(), meta)
                 .key(event.kafka_key())
                 .payload(payload.as_slice());
 
@@ -114,5 +151,26 @@ impl Drop for KafkaProducer {
                 "Kafka producer flush 실패"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::kafka::producer::KafkaProducerConfig;
+
+    #[test]
+    fn config_uses_host_defaults_when_env_is_absent() {
+        let config = KafkaProducerConfig::from_env_values(None, None);
+
+        assert_eq!(config.bootstrap_servers(), "localhost:9092");
+        assert_eq!(config.topic(), "matching-engine-events");
+    }
+
+    #[test]
+    fn config_uses_env_overrides_for_docker_network() {
+        let config = KafkaProducerConfig::from_env_values(Some("kafka:9092"), Some("events"));
+
+        assert_eq!(config.bootstrap_servers(), "kafka:9092");
+        assert_eq!(config.topic(), "events");
     }
 }
