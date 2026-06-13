@@ -167,7 +167,7 @@ pub async fn run_consumer(
             },
 
             sent = sent_rx.recv(), if !sends_done => match sent {
-                Some(notice) => state.on_sent(notice.order_id, notice.at),
+                Some(notice) => state.on_sent(notice.order_id, notice.sent_at, notice.acked_at),
                 None => sends_done = true,
             },
         }
@@ -202,7 +202,7 @@ async fn settle_correlator(
             },
 
             sent = sent_rx.recv(), if !*sends_done => match sent {
-                Some(notice) => state.on_sent(notice.order_id, notice.at),
+                Some(notice) => state.on_sent(notice.order_id, notice.sent_at, notice.acked_at),
                 None => *sends_done = true,
             },
 

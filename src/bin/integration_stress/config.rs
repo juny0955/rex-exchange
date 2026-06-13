@@ -5,6 +5,7 @@ const DEFAULT_SCENARIO: Scenario = Scenario::FullFillSameLevel;
 const DEFAULT_SYMBOLS: usize = 1;
 const DEFAULT_SWEEP_DEPTH: usize = 10;
 const DEFAULT_CONCURRENCY: usize = 64;
+const DEFAULT_CONNECTIONS: usize = 8;
 const DEFAULT_TIMEOUT_SEC: u64 = 30;
 const DEFAULT_SETTLE_TIMEOUT_SEC: u64 = 15;
 const DEFAULT_GRPC_ENDPOINT: &str = "http://localhost:50051";
@@ -16,6 +17,7 @@ const MAX_ORDERS: usize = 10_000_000;
 const MAX_SWEEP_DEPTH: usize = 10_000;
 const MAX_SYMBOLS: usize = 1_024;
 const MAX_CONCURRENCY: usize = 8_192;
+const MAX_CONNECTIONS: usize = 1_024;
 const MAX_TARGET_COMMANDS_PER_SEC: u64 = 1_000_000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -91,6 +93,7 @@ pub struct Config {
     pub symbols: usize,
     pub sweep_depth: usize,
     pub concurrency: usize,
+    pub connections: usize,
     pub timeout: Duration,
     pub settle_timeout: Duration,
     pub grpc_endpoint: String,
@@ -108,6 +111,7 @@ impl Default for Config {
             symbols: DEFAULT_SYMBOLS,
             sweep_depth: DEFAULT_SWEEP_DEPTH,
             concurrency: DEFAULT_CONCURRENCY,
+            connections: DEFAULT_CONNECTIONS,
             timeout: Duration::from_secs(DEFAULT_TIMEOUT_SEC),
             settle_timeout: Duration::from_secs(DEFAULT_SETTLE_TIMEOUT_SEC),
             grpc_endpoint: DEFAULT_GRPC_ENDPOINT.to_string(),
@@ -123,6 +127,7 @@ pub fn parse_config(args: impl IntoIterator<Item = String>) -> Result<Config, St
     let mut symbols = DEFAULT_SYMBOLS;
     let mut sweep_depth = DEFAULT_SWEEP_DEPTH;
     let mut concurrency = DEFAULT_CONCURRENCY;
+    let mut connections = DEFAULT_CONNECTIONS;
     let mut timeout = Duration::from_secs(DEFAULT_TIMEOUT_SEC);
     let mut settle_timeout = Duration::from_secs(DEFAULT_SETTLE_TIMEOUT_SEC);
     let mut grpc_endpoint = DEFAULT_GRPC_ENDPOINT.to_string();
@@ -163,6 +168,13 @@ pub fn parse_config(args: impl IntoIterator<Item = String>) -> Result<Config, St
                     &next_arg(&mut args, "--concurrency")?,
                     "--concurrency",
                     MAX_CONCURRENCY,
+                )?;
+            }
+            "--connections" => {
+                connections = parse_nonzero_usize(
+                    &next_arg(&mut args, "--connections")?,
+                    "--connections",
+                    MAX_CONNECTIONS,
                 )?;
             }
             "--timeout-sec" => {
@@ -239,6 +251,7 @@ pub fn parse_config(args: impl IntoIterator<Item = String>) -> Result<Config, St
         symbols,
         sweep_depth,
         concurrency,
+        connections,
         timeout,
         settle_timeout,
         grpc_endpoint,

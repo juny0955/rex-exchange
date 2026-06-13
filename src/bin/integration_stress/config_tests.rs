@@ -35,6 +35,24 @@ fn 시나리오와_엔드포인트_파싱() {
 }
 
 #[test]
+fn connections_기본값은_8() {
+    let config = parse(&[]).unwrap();
+    assert_eq!(config.connections, 8);
+}
+
+#[test]
+fn connections_파싱() {
+    let config = parse(&["--connections", "64"]).unwrap();
+    assert_eq!(config.connections, 64);
+}
+
+#[test]
+fn connections_상한_초과는_에러() {
+    let err = parse(&["--connections", "2000"]).unwrap_err();
+    assert!(err.contains("--connections"));
+}
+
+#[test]
 fn paced_모드는_target이_필요() {
     let err = parse(&["--duration-sec", "10"]).unwrap_err();
     assert!(err.contains("--target-commands-per-sec"));

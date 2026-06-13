@@ -30,7 +30,9 @@ fn report(attempted: usize, accepted: u64, elapsed: Duration) -> RunReport {
             matched: accepted,
             missing: 0,
             unmatched_recv: 0,
-            latency: Default::default(),
+            ack_latency: Default::default(),
+            post_ack_latency: Default::default(),
+            e2e_latency: Default::default(),
         },
     }
 }
@@ -61,6 +63,10 @@ fn report_uses_correlator_settle_fields_for_lossless_verdict() {
     let config = Config::default();
     let output = render_report(&config, &report(100, 100, Duration::from_secs(1)));
 
+    assert!(output.contains("gRPC 연결 수(connections)"));
+    assert!(output.contains("gRPC ack 지연"));
+    assert!(output.contains("post-ack 지연"));
+    assert!(output.contains("E2E 지연"));
     assert!(output.contains("송신 알림 처리"));
     assert!(output.contains("상관 매칭"));
     assert!(output.contains("무손실 판정"));

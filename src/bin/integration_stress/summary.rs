@@ -14,7 +14,7 @@ pub fn print_usage() {
          \x20 [--scenario cancel-missing|place-resting-limit|full-fill-same-level|market-quote-sweep|partial-fill-rest|cancel-resting-order|amend-decrease-qty|amend-price-change] \\\n\
          \x20 [--orders N] \\\n\
          \x20 [--duration-sec N --target-commands-per-sec N [--warmup-sec N]] \\\n\
-         \x20 [--symbols N] [--sweep-depth N] [--concurrency N] \\\n\
+         \x20 [--symbols N] [--sweep-depth N] [--concurrency N] [--connections N] \\\n\
          \x20 [--timeout-sec N] [--settle-timeout-sec N] \\\n\
          \x20 [--grpc-endpoint http://localhost:50051] \\\n\
          \x20 [--kafka-brokers localhost:9092] [--kafka-topic matching-engine-events]\n\
@@ -72,8 +72,16 @@ pub(crate) fn render_report(config: &Config, report: &RunReport) -> String {
     push_row(&mut out, "무손실 판정", verdict(report));
     out.push('\n');
 
-    push_section(&mut out, "[E2E 지연 (gRPC 송신 → Kafka 수신)]");
-    push_latency(&mut out, &c.latency);
+    push_section(&mut out, "[gRPC ack 지연 (T2-T1: 송신→SUBMITTED)]");
+    push_latency(&mut out, &c.ack_latency);
+    out.push('\n');
+
+    push_section(&mut out, "[post-ack 지연 (T3-T2: SUBMITTED→Kafka)]");
+    push_latency(&mut out, &c.post_ack_latency);
+    out.push('\n');
+
+    push_section(&mut out, "[E2E 지연 (T3-T1: 송신→Kafka)]");
+    push_latency(&mut out, &c.e2e_latency);
     out.push('\n');
 
     push_section(&mut out, "[처리량]");
@@ -112,6 +120,11 @@ fn push_conditions(out: &mut String, config: &Config) {
     push_row(out, "심볼 수", &count(config.symbols as u64));
     push_row(out, "스윕 깊이", &count(config.sweep_depth as u64));
     push_row(out, "동시 실행(units)", &count(config.concurrency as u64));
+    push_row(
+        out,
+        "gRPC 연결 수(connections)",
+        &count(config.connections as u64),
+    );
     push_row(out, "gRPC 엔드포인트", &config.grpc_endpoint);
     push_row(out, "Kafka 브로커", &config.kafka_brokers);
     push_row(out, "Kafka 토픽", &config.kafka_topic);

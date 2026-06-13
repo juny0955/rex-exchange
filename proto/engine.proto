@@ -6,6 +6,10 @@ service MatchingEngineService {
     rpc PlaceOrder(PlaceOrderRequest) returns (PlaceOrderResponse);
     rpc CancelOrder(CancelOrderRequest) returns (CancelOrderResponse);
     rpc AmendOrder(AmendOrderRequest) returns (AmendOrderResponse);
+
+    // 여러 명령을 한 RPC로 묶어 콜당 고정비(HTTP/2 스트림/HPACK/응답 인코드)를 분산한다.
+    // commands 순서대로 dispatch하므로 한 워크로드 unit 내부 의존성(place→cancel/amend)이 보존된다.
+    rpc SubmitBatch(SubmitBatchRequest) returns (SubmitBatchResponse);
 }
 
 enum Side {
@@ -31,6 +35,7 @@ enum SubmitStatus {
     SUBMIT_STATUS_UNSPECIFIED = 0;
     SUBMIT_STATUS_SUBMITTED = 1;
     SUBMIT_STATUS_REJECTED = 2;
+    SUBMIT_STATUS_RESOURCE_EXHAUSTED = 3;
 }
 
 message PlaceOrderRequest {
@@ -77,4 +82,26 @@ message AmendOrderResponse {
     string order_id = 1;
     SubmitStatus status = 2;
     string message = 3;
+}
+
+message Command {
+    oneof command {
+        PlaceOrderRequest place = 1;
+        CancelOrderRequest cancel = 2;
+        AmendOrderRequest amend = 3;
+    }
+}
+
+message SubmitBatchRequest {
+    repeated Command commands = 1;
+}
+
+message CommandResult {
+    string order_id = 1;
+    SubmitStatus status = 2;
+    string message = 3;
+}
+
+message SubmitBatchResponse {
+    repeated CommandResult results = 1;
 }

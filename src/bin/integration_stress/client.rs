@@ -5,12 +5,13 @@ use matching_engine::{
     domain::order::{Order, OrderSize, Side, TimeInForce},
     engine::command::{AmendOrderCommand, EngineCommand},
     grpc::engine::{
-        AmendOrderRequest, CancelOrderRequest, OrderType as ProtoOrderType, PlaceOrderRequest,
-        Side as ProtoSide, SubmitStatus, TimeInForce as ProtoTimeInForce,
+        AmendOrderRequest, CancelOrderRequest, Command, OrderType as ProtoOrderType,
+        PlaceOrderRequest, Side as ProtoSide, SubmitBatchRequest, SubmitStatus,
+        TimeInForce as ProtoTimeInForce, command,
         matching_engine_service_client::MatchingEngineServiceClient, place_order_request::Size,
     },
 };
-use tonic::{Code, transport::Channel};
+use tonic::transport::Channel;
 use uuid::Uuid;
 
 pub type GrpcClient = MatchingEngineServiceClient<Channel>;
@@ -32,36 +33,74 @@ pub async fn connect(endpoint: &str) -> Result<GrpcClient, tonic::transport::Err
     MatchingEngineServiceClient::connect(endpoint.to_string()).await
 }
 
-/// 명령을 gRPC로 전송하고 결과를 분류한다.
-pub async fn send(client: &mut GrpcClient, symbol: &str, command: &EngineCommand) -> SendOutcome {
-    match command {
-        EngineCommand::Place(order) => {
-            classify(client.place_order(place_request(order)).await.map(|r| {
-                let status = r.into_inner().status;
-                status == SubmitStatus::Submitted as i32
-            }))
+/// 독립 gRPC 연결 `count`개로 구성된 풀을 만든다.
+///
+/// tonic `Channel`은 clone해도 동일한 HTTP/2 연결을 공유하므로, 워커를 늘려도 단일 연결의
+/// 동시 스트림 한도에 막힌다. 부하 생성 처리량을 높이려면 `connect()`를 여러 번 호출해
+/// **물리적으로 분리된 연결**을 확보해야 한다.
+pub async fn connect_pool(
+    endpoint: &str,
+    count: usize,
+) -> Result<Vec<GrpcClient>, tonic::transport::Error> {
+    let mut pool = Vec::with_capacity(count);
+    for _ in 0..count {
+        pool.push(connect(endpoint).await?);
+    }
+    Ok(pool)
+}
+
+/// 한 워크로드 unit의 명령들을 batch RPC 1콜로 전송하고, 입력 순서대로 결과를 분류한다.
+/// 콜당 고정비를 분산해 서버 gRPC ingress CPU를 줄이는 것이 목적이다.
+pub async fn send_batch(
+    client: &mut GrpcClient,
+    symbol: &str,
+    commands: &[EngineCommand],
+) -> Vec<SendOutcome> {
+    let request = SubmitBatchRequest {
+        commands: commands
+            .iter()
+            .map(|command| to_proto_command(symbol, command))
+            .collect(),
+    };
+
+    match client.submit_batch(request).await {
+        Ok(response) => {
+            let mut outcomes: Vec<SendOutcome> = response
+                .into_inner()
+                .results
+                .iter()
+                .map(|result| classify_status(result.status))
+                .collect();
+            // 응답 결과 수가 요청보다 적으면 부족분은 에러로 본다.
+            if outcomes.len() < commands.len() {
+                outcomes.resize(commands.len(), SendOutcome::Error);
+            }
+            outcomes
         }
-        EngineCommand::Cancel(order_id) => classify(
-            client
-                .cancel_order(cancel_request(*order_id, symbol))
-                .await
-                .map(|r| r.into_inner().status == SubmitStatus::Submitted as i32),
-        ),
-        EngineCommand::Amend(cmd) => classify(
-            client
-                .amend_order(amend_request(cmd, symbol))
-                .await
-                .map(|r| r.into_inner().status == SubmitStatus::Submitted as i32),
-        ),
+        Err(_) => vec![SendOutcome::Error; commands.len()],
     }
 }
 
-fn classify(result: Result<bool, tonic::Status>) -> SendOutcome {
-    match result {
-        Ok(true) => SendOutcome::Submitted,
-        Ok(false) => SendOutcome::Rejected,
-        Err(status) if status.code() == Code::ResourceExhausted => SendOutcome::ResourceExhausted,
-        Err(_) => SendOutcome::Error,
+pub fn classify_status(status: i32) -> SendOutcome {
+    if status == SubmitStatus::Submitted as i32 {
+        SendOutcome::Submitted
+    } else if status == SubmitStatus::ResourceExhausted as i32 {
+        SendOutcome::ResourceExhausted
+    } else {
+        SendOutcome::Rejected
+    }
+}
+
+pub fn to_proto_command(symbol: &str, command: &EngineCommand) -> Command {
+    let inner = match command {
+        EngineCommand::Place(order) => command::Command::Place(place_request(order)),
+        EngineCommand::Cancel(order_id) => {
+            command::Command::Cancel(cancel_request(*order_id, symbol))
+        }
+        EngineCommand::Amend(cmd) => command::Command::Amend(amend_request(cmd, symbol)),
+    };
+    Command {
+        command: Some(inner),
     }
 }
 

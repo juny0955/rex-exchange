@@ -43,7 +43,7 @@ services:
     build:
       context: .
       target: matching-engine
-    image: rex-matching-engine:local
+    image: rustex-matching-engine:local
     container_name: rustex-matching-engine
     cpus: 1.0
     mem_limit: 1g
@@ -61,7 +61,7 @@ services:
     build:
       context: .
       target: integration-stress
-    image: rex-integration-stress:local
+    image: rustex-integration-stress:local
     profiles:
       - stress
     depends_on:
@@ -72,7 +72,7 @@ services:
     build:
       context: .
       target: runtime-stress
-    image: rex-runtime-stress:local
+    image: rustex-runtime-stress:local
     profiles:
       - stress
     cpus: 1.0

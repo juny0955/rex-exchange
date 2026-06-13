@@ -83,7 +83,7 @@ struct WorkUnit {
 
 pub async fn dispatch_burst(
     config: &Config,
-    client: &GrpcClient,
+    clients: &[GrpcClient],
     sent_tx: &mpsc::UnboundedSender<SentNotice>,
     symbols: &[String],
     orders: usize,
@@ -93,7 +93,7 @@ pub async fn dispatch_burst(
     let (work_tx, work_rx) = mpsc::channel(config.concurrency);
     let mut workers = spawn_workers(
         config.concurrency,
-        client,
+        clients,
         sent_tx,
         Arc::clone(&counts),
         work_rx,
@@ -129,7 +129,7 @@ pub async fn dispatch_burst(
 
 pub async fn dispatch_paced(
     config: &Config,
-    client: &GrpcClient,
+    clients: &[GrpcClient],
     sent_tx: &mpsc::UnboundedSender<SentNotice>,
     symbols: &[String],
     duration: Duration,
@@ -140,7 +140,7 @@ pub async fn dispatch_paced(
     let (work_tx, work_rx) = mpsc::channel(config.concurrency);
     let mut workers = spawn_workers(
         config.concurrency,
-        client,
+        clients,
         sent_tx,
         Arc::clone(&counts),
         work_rx,
@@ -197,15 +197,16 @@ pub async fn dispatch_paced(
 
 fn spawn_workers(
     count: usize,
-    client: &GrpcClient,
+    clients: &[GrpcClient],
     sent_tx: &mpsc::UnboundedSender<SentNotice>,
     counts: Arc<DispatchCounts>,
     work_rx: mpsc::Receiver<WorkUnit>,
 ) -> JoinSet<()> {
     let mut workers = JoinSet::new();
     let work_rx = Arc::new(Mutex::new(work_rx));
-    for _ in 0..count {
-        let client = client.clone();
+    for i in 0..count {
+        // 연결 풀을 round-robin으로 배분한다. 풀이 워커보다 작으면 일부 연결을 공유한다.
+        let client = clients[i % clients.len()].clone();
         let sent_tx = sent_tx.clone();
         let counts = Arc::clone(&counts);
         let work_rx = Arc::clone(&work_rx);
@@ -241,14 +242,20 @@ async fn process_unit(
     symbol: String,
     commands: Vec<EngineCommand>,
 ) {
-    for command in commands {
-        let order_id = command.order_id().to_string();
-        let at = Instant::now();
+    // unit 전체를 batch RPC 1콜로 전송한다. unit 내부 명령 묶음이므로 같은 T1/T2를 공유한다.
+    let sent_at = Instant::now();
+    let outcomes = client::send_batch(client, &symbol, &commands).await;
+    let acked_at = Instant::now();
 
-        match client::send(client, &symbol, &command).await {
+    for (command, outcome) in commands.iter().zip(outcomes) {
+        match outcome {
             SendOutcome::Submitted => {
                 counts.accepted.fetch_add(1, Ordering::Relaxed);
-                let _ = sent_tx.send(SentNotice { order_id, at });
+                let _ = sent_tx.send(SentNotice {
+                    order_id: command.order_id().to_string(),
+                    sent_at,
+                    acked_at,
+                });
             }
             SendOutcome::Rejected => {
                 counts.rejected.fetch_add(1, Ordering::Relaxed);

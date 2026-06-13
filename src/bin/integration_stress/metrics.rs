@@ -10,17 +10,23 @@ use std::{
 };
 
 /// gRPC 송신 시각 알림(접수 성공한 명령에 대해서만 보낸다).
+/// `sent_at`(T1)=요청 시작, `acked_at`(T2)=SUBMITTED 응답 수신.
 pub struct SentNotice {
     pub order_id: String,
-    pub at: Instant,
+    pub sent_at: Instant,
+    pub acked_at: Instant,
 }
 
 #[derive(Default)]
 pub struct CorrelatorState {
-    pending_sends: HashMap<String, VecDeque<Instant>>,
+    /// order_id별 (sent_at=T1, acked_at=T2) 쌍 FIFO.
+    pending_sends: HashMap<String, VecDeque<(Instant, Instant)>>,
+    /// order_id별 recv_at=T3 FIFO.
     pending_recvs: HashMap<String, VecDeque<Instant>>,
     seen_event_ids: HashSet<String>,
-    latencies_us: Vec<u64>,
+    ack_us: Vec<u64>,
+    post_ack_us: Vec<u64>,
+    e2e_us: Vec<u64>,
     sent: u64,
     received: u64,
     duplicates: u64,
@@ -28,18 +34,18 @@ pub struct CorrelatorState {
 }
 
 impl CorrelatorState {
-    pub fn on_sent(&mut self, order_id: String, at: Instant) {
+    pub fn on_sent(&mut self, order_id: String, sent_at: Instant, acked_at: Instant) {
         self.sent += 1;
 
         if let Some(recv_at) = pop_front(&mut self.pending_recvs, &order_id) {
-            self.record_latency(at, recv_at);
+            self.record_latency(sent_at, acked_at, recv_at);
             return;
         }
 
         self.pending_sends
             .entry(order_id)
             .or_default()
-            .push_back(at);
+            .push_back((sent_at, acked_at));
     }
 
     pub fn is_settled(&self, expected: u64) -> bool {
@@ -47,12 +53,10 @@ impl CorrelatorState {
     }
 
     pub fn snapshot(&self) -> CorrelatorSummary {
-        let mut latencies_us = self.latencies_us.clone();
-        latencies_us.sort_unstable();
-        self.summary_from_sorted(&latencies_us)
+        self.summary()
     }
 
-    pub fn on_recv(&mut self, order_id: String, event_id: String, at: Instant) {
+    pub fn on_recv(&mut self, order_id: String, event_id: String, recv_at: Instant) {
         self.received += 1;
 
         if !self.seen_event_ids.insert(event_id) {
@@ -60,29 +64,33 @@ impl CorrelatorState {
             return;
         }
 
-        if let Some(send_at) = pop_front(&mut self.pending_sends, &order_id) {
-            self.record_latency(send_at, at);
+        if let Some((sent_at, acked_at)) = pop_front(&mut self.pending_sends, &order_id) {
+            self.record_latency(sent_at, acked_at, recv_at);
             return;
         }
 
         self.pending_recvs
             .entry(order_id)
             .or_default()
-            .push_back(at);
+            .push_back(recv_at);
     }
 
-    fn record_latency(&mut self, send_at: Instant, recv_at: Instant) {
-        let micros = recv_at.saturating_duration_since(send_at).as_micros();
-        self.latencies_us.push(micros as u64);
+    /// T1/T2/T3로부터 ack(T2−T1), post-ack(T3−T2), e2e(T3−T1) 지연을 각각 기록한다.
+    fn record_latency(&mut self, sent_at: Instant, acked_at: Instant, recv_at: Instant) {
+        self.ack_us
+            .push(acked_at.saturating_duration_since(sent_at).as_micros() as u64);
+        self.post_ack_us
+            .push(recv_at.saturating_duration_since(acked_at).as_micros() as u64);
+        self.e2e_us
+            .push(recv_at.saturating_duration_since(sent_at).as_micros() as u64);
         self.matched += 1;
     }
 
-    pub fn finish(mut self) -> CorrelatorSummary {
-        self.latencies_us.sort_unstable();
-        self.summary_from_sorted(&self.latencies_us)
+    pub fn finish(self) -> CorrelatorSummary {
+        self.summary()
     }
 
-    fn summary_from_sorted(&self, sorted_latencies: &[u64]) -> CorrelatorSummary {
+    fn summary(&self) -> CorrelatorSummary {
         let missing = self
             .pending_sends
             .values()
@@ -101,9 +109,18 @@ impl CorrelatorState {
             matched: self.matched,
             missing,
             unmatched_recv,
-            latency: LatencySummary::from_sorted(sorted_latencies),
+            ack_latency: summarize(&self.ack_us),
+            post_ack_latency: summarize(&self.post_ack_us),
+            e2e_latency: summarize(&self.e2e_us),
         }
     }
+}
+
+/// 미정렬 지연 표본을 정렬해 `LatencySummary`로 요약한다.
+fn summarize(samples: &[u64]) -> LatencySummary {
+    let mut sorted = samples.to_vec();
+    sorted.sort_unstable();
+    LatencySummary::from_sorted(&sorted)
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -122,7 +139,12 @@ pub struct CorrelatorSummary {
     pub missing: u64,
     /// 대응 송신을 찾지 못한 수신 수(이전 실행 잔여 등; latest 오프셋에서는 0이어야 함).
     pub unmatched_recv: u64,
-    pub latency: LatencySummary,
+    /// gRPC ack 지연(T2−T1): 송신→SUBMITTED.
+    pub ack_latency: LatencySummary,
+    /// post-ack 지연(T3−T2): SUBMITTED→Kafka 수신.
+    pub post_ack_latency: LatencySummary,
+    /// E2E 지연(T3−T1): 송신→Kafka 수신.
+    pub e2e_latency: LatencySummary,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -168,7 +190,7 @@ fn percentile(sorted: &[u64], p: f64) -> u64 {
 }
 
 /// order_id 큐에서 맨 앞 항목을 꺼내고, 비면 엔트리를 제거한다.
-fn pop_front(map: &mut HashMap<String, VecDeque<Instant>>, order_id: &str) -> Option<Instant> {
+fn pop_front<T>(map: &mut HashMap<String, VecDeque<T>>, order_id: &str) -> Option<T> {
     let queue = map.get_mut(order_id)?;
     let value = queue.pop_front();
     if queue.is_empty() {

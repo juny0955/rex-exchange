@@ -14,7 +14,7 @@ use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
 use crate::integration_stress::{
-    client::{GrpcClient, connect},
+    client::{GrpcClient, connect_pool},
     config::{Config, RunMode},
     consumer::{ControlMsg, SettleResult, build_consumer, ensure_topic, run_consumer},
     dispatch::{PhaseOutcome, dispatch_burst, dispatch_paced},
@@ -72,15 +72,15 @@ pub async fn run(config: Config) {
         return;
     }
 
-    let client = match connect(&config.grpc_endpoint).await {
-        Ok(client) => client,
+    let clients = match connect_pool(&config.grpc_endpoint, config.connections).await {
+        Ok(clients) => clients,
         Err(e) => {
             eprintln!("gRPC 연결 실패({}): {e}", config.grpc_endpoint);
             return;
         }
     };
 
-    let report = run_phases(&config, &client, &sent_tx, &symbols, &control_tx).await;
+    let report = run_phases(&config, &clients, &sent_tx, &symbols, &control_tx).await;
 
     let _ = finish_correlator(&control_tx).await;
     drop(sent_tx);
@@ -92,7 +92,7 @@ pub async fn run(config: Config) {
 
 async fn run_phases(
     config: &Config,
-    client: &GrpcClient,
+    clients: &[GrpcClient],
     sent_tx: &mpsc::UnboundedSender<SentNotice>,
     symbols: &[String],
     control_tx: &mpsc::UnboundedSender<ControlMsg>,
@@ -100,7 +100,7 @@ async fn run_phases(
     match config.mode {
         RunMode::Burst { orders } => {
             let dispatch_started = Instant::now();
-            let phase = dispatch_burst(config, client, sent_tx, symbols, orders).await;
+            let phase = dispatch_burst(config, clients, sent_tx, symbols, orders).await;
             let settle =
                 settle_correlator(control_tx, phase.dispatch.accepted, config.settle_timeout)
                     .await
@@ -116,7 +116,7 @@ async fn run_phases(
             if !warmup.is_zero() {
                 let w = dispatch_paced(
                     config,
-                    client,
+                    clients,
                     sent_tx,
                     symbols,
                     warmup,
@@ -130,7 +130,7 @@ async fn run_phases(
             let dispatch_started = Instant::now();
             let phase = dispatch_paced(
                 config,
-                client,
+                clients,
                 sent_tx,
                 symbols,
                 duration,
