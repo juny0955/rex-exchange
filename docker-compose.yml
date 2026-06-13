@@ -3,8 +3,11 @@ services:
     image: apache/kafka:4.1.2
     container_name: rustex-kafka
     hostname: kafka
+    cpus: 2.0
+    mem_limit: 2g
+    memswap_limit: 2g
     ports:
-      - "9092:9092"
+      - "9092:29092"
     environment:
       CLUSTER_ID: "4L6g3nShT-eMCtK--X86sw"
 
@@ -12,7 +15,7 @@ services:
       KAFKA_PROCESS_ROLES: "broker,controller"
 
       KAFKA_LISTENERS: "PLAINTEXT://:9092,PLAINTEXT_HOST://:29092,CONTROLLER://:9093"
-      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://localhost:9092,PLAINTEXT_HOST://localhost:29092"
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9092"
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,CONTROLLER:PLAINTEXT"
 
       KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
@@ -26,3 +29,52 @@ services:
 
       KAFKA_NUM_PARTITIONS: 3
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:29092 --list >/dev/null 2>&1",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  matching-engine:
+    build:
+      context: .
+      target: matching-engine
+    image: rex-matching-engine:local
+    container_name: rustex-matching-engine
+    cpus: 1.0
+    mem_limit: 1g
+    memswap_limit: 1g
+    environment:
+      MATCHING_ENGINE_KAFKA_BROKERS: "kafka:9092"
+      MATCHING_ENGINE_KAFKA_TOPIC: "matching-engine-events"
+    ports:
+      - "50051:50051"
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  integration-stress:
+    build:
+      context: .
+      target: integration-stress
+    image: rex-integration-stress:local
+    profiles:
+      - stress
+    depends_on:
+      matching-engine:
+        condition: service_started
+
+  runtime-stress:
+    build:
+      context: .
+      target: runtime-stress
+    image: rex-runtime-stress:local
+    profiles:
+      - stress
+    cpus: 1.0
+    mem_limit: 1g
+    memswap_limit: 1g

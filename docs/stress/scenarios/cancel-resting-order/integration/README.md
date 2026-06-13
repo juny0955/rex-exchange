@@ -26,7 +26,7 @@
 대표 실행 명령:
 
 ```bash
-./target/release/integration_stress --scenario cancel-resting-order --warmup-sec 5 --duration-sec 30 --target-commands-per-sec <target> --symbols 1 --sweep-depth 10 --concurrency 128 --settle-timeout-sec 15
+docker compose run --rm integration-stress --grpc-endpoint http://matching-engine:50051 --kafka-brokers kafka:9092 --scenario cancel-resting-order --warmup-sec 5 --duration-sec 30 --target-commands-per-sec <target> --symbols 1 --sweep-depth 10 --concurrency 128 --settle-timeout-sec 15
 ```
 
 ## 측정 내역

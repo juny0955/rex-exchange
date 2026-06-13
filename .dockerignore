@@ -1,0 +1,8 @@
+target/
+docs/
+.git/
+.idea/
+.omc/
+.claude/
+docker-compose.yml
+Dockerfile

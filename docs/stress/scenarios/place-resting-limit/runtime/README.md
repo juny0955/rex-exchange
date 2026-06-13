@@ -34,7 +34,7 @@
 대표 실행 명령:
 
 ```bash
-./target/release/runtime_stress --scenario place-resting-limit --warmup-sec 10 --duration-sec 30 --target-commands-per-sec <target> --symbols 1 --sweep-depth 10 --timeout-sec 30
+docker compose run --rm runtime-stress --scenario place-resting-limit --warmup-sec 10 --duration-sec 30 --target-commands-per-sec <target> --symbols 1 --sweep-depth 10 --timeout-sec 30
 ```
 
 ## 측정 내역

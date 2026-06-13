@@ -34,7 +34,7 @@ Place/Cancel 쌍으로 구성되어 반복 종료 시 orderbook이 비워지므�
 대표 실행 명령:
 
 ```bash
-./target/release/runtime_stress --scenario cancel-resting-order --warmup-sec 10 --duration-sec 30 --target-commands-per-sec <target> --symbols 1 --sweep-depth 10 --timeout-sec 30
+docker compose run --rm runtime-stress --scenario cancel-resting-order --warmup-sec 10 --duration-sec 30 --target-commands-per-sec <target> --symbols 1 --sweep-depth 10 --timeout-sec 30
 ```
 
 ## 측정 내역

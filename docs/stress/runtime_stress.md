@@ -38,21 +38,22 @@ gRPC와 Kafka는 포함하지 않는다. Kafka 지연은 `--publisher-delay-ms` 
 
 ## 빌드
 
-측정 전 release binary를 먼저 빌드한다.
+호스트에서 개발 확인을 할 때는 release binary를 직접 빌드할 수 있다.
+공식 측정에서는 compose가 `Dockerfile`의 `runtime-stress` target을 빌드한다.
 
 ```powershell
 cargo build --release --bin runtime_stress
 ```
 
-이후 측정은 `cargo run`보다 binary를 직접 실행하는 편이 좋다. `cargo run`은 Cargo 빌드/실행 로그가 함께 섞인다.
-Windows는 `.exe` 파일을, macOS/Linux는 확장자 없는 binary를 실행한다.
+호스트 참고 실행은 `cargo run`보다 binary를 직접 실행하는 편이 좋다. `cargo run`은 Cargo 빌드/실행 로그가 함께 섞인다.
+Windows 호스트 참고 실행은 `.exe` 파일을 사용하고, 공식 macOS/Linux 측정은 Docker 명령을 사용한다.
 
 ```powershell
 .\target\release\runtime_stress.exe --duration-sec 1 --target-commands-per-sec 100 --sweep-depth 3 --timeout-sec 5
 ```
 
 ```bash
-./target/release/runtime_stress --duration-sec 1 --target-commands-per-sec 100 --sweep-depth 3 --timeout-sec 5
+docker compose run --rm runtime-stress --duration-sec 1 --target-commands-per-sec 100 --sweep-depth 3 --timeout-sec 5
 ```
 
 ## 옵션
@@ -121,7 +122,7 @@ Windows는 `.exe` 파일을, macOS/Linux는 확장자 없는 binary를 실행한
 ```
 
 ```bash
-./target/release/runtime_stress --duration-sec 1 --target-commands-per-sec 100 --sweep-depth 3 --timeout-sec 5
+docker compose run --rm runtime-stress --duration-sec 1 --target-commands-per-sec 100 --sweep-depth 3 --timeout-sec 5
 ```
 
 2. warm-up을 둔 기본 부하 테스트를 실행한다.
@@ -132,8 +133,8 @@ Windows는 `.exe` 파일을, macOS/Linux는 확장자 없는 binary를 실행한
 ```
 
 ```bash
-./target/release/runtime_stress --scenario full-fill-same-level --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
-./target/release/runtime_stress --scenario full-fill-same-level --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 5000 --sweep-depth 10 --timeout-sec 30
+docker compose run --rm runtime-stress --scenario full-fill-same-level --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
+docker compose run --rm runtime-stress --scenario full-fill-same-level --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 5000 --sweep-depth 10 --timeout-sec 30
 ```
 
 3. 반복마다 orderbook이 비워지는 체결 시나리오를 같은 command 유입률에서 비교한다.
@@ -144,8 +145,8 @@ Windows는 `.exe` 파일을, macOS/Linux는 확장자 없는 binary를 실행한
 ```
 
 ```bash
-./target/release/runtime_stress --scenario full-fill-same-level --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
-./target/release/runtime_stress --scenario market-quote-sweep --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
+docker compose run --rm runtime-stress --scenario full-fill-same-level --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
+docker compose run --rm runtime-stress --scenario market-quote-sweep --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
 ```
 
 4. 잔존 주문이 누적되는 부하를 별도로 관측한다.
@@ -156,8 +157,8 @@ Windows는 `.exe` 파일을, macOS/Linux는 확장자 없는 binary를 실행한
 ```
 
 ```bash
-./target/release/runtime_stress --scenario partial-fill-rest --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
-./target/release/runtime_stress --scenario place-resting-limit --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
+docker compose run --rm runtime-stress --scenario partial-fill-rest --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
+docker compose run --rm runtime-stress --scenario place-resting-limit --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
 ```
 
 이 결과는 잔존 주문이 누적되는 non-stationary workload의 관측값이다. `full-fill-same-level`, `market-quote-sweep`의 안정 TPS와 직접 비교하지 않는다.
@@ -171,9 +172,9 @@ Windows는 `.exe` 파일을, macOS/Linux는 확장자 없는 binary를 실행한
 ```
 
 ```bash
-./target/release/runtime_stress --scenario cancel-resting-order --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
-./target/release/runtime_stress --scenario amend-decrease-qty --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --timeout-sec 30
-./target/release/runtime_stress --scenario amend-price-change --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --timeout-sec 30
+docker compose run --rm runtime-stress --scenario cancel-resting-order --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
+docker compose run --rm runtime-stress --scenario amend-decrease-qty --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --timeout-sec 30
+docker compose run --rm runtime-stress --scenario amend-price-change --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --timeout-sec 30
 ```
 
 6. 심볼 수를 늘려 확장성을 확인한다.
@@ -185,9 +186,9 @@ Windows는 `.exe` 파일을, macOS/Linux는 확장자 없는 binary를 실행한
 ```
 
 ```bash
-./target/release/runtime_stress --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --symbols 1 --sweep-depth 10 --timeout-sec 30
-./target/release/runtime_stress --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --symbols 2 --sweep-depth 10 --timeout-sec 30
-./target/release/runtime_stress --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --symbols 4 --sweep-depth 10 --timeout-sec 30
+docker compose run --rm runtime-stress --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --symbols 1 --sweep-depth 10 --timeout-sec 30
+docker compose run --rm runtime-stress --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --symbols 2 --sweep-depth 10 --timeout-sec 30
+docker compose run --rm runtime-stress --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --symbols 4 --sweep-depth 10 --timeout-sec 30
 ```
 
 7. publisher 지연을 넣어 결과 발행 병목을 확인한다.
@@ -198,8 +199,8 @@ Windows는 `.exe` 파일을, macOS/Linux는 확장자 없는 binary를 실행한
 ```
 
 ```bash
-./target/release/runtime_stress --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --publisher-delay-ms 1 --timeout-sec 30
-./target/release/runtime_stress --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --publisher-delay-ms 5 --timeout-sec 30
+docker compose run --rm runtime-stress --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --publisher-delay-ms 1 --timeout-sec 30
+docker compose run --rm runtime-stress --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 1000 --sweep-depth 10 --publisher-delay-ms 5 --timeout-sec 30
 ```
 
 8. 순간 burst 한계를 보고 싶을 때만 기존 `--orders` 모드를 사용한다.
@@ -209,7 +210,7 @@ Windows는 `.exe` 파일을, macOS/Linux는 확장자 없는 binary를 실행한
 ```
 
 ```bash
-./target/release/runtime_stress --orders 1000 --sweep-depth 10 --timeout-sec 30
+docker compose run --rm runtime-stress --orders 1000 --sweep-depth 10 --timeout-sec 30
 ```
 
 이 명령은 11,000개 command를 가능한 빨리 단일 심볼 큐에 넣는다. `채널 포화`가 높게 나오는 것은 burst stress 결과로 해석한다.
@@ -248,17 +249,18 @@ Windows는 `.exe` 파일을, macOS/Linux는 확장자 없는 binary를 실행한
 
 ## Docker 제한 환경 실행
 
-로컬에서 리소스를 제한해 측정할 때는 repo 루트의 `Dockerfile`로 이미지를 빌드한 뒤
-`--cpus`, `--memory`로 제한을 걸어 실행한다.
+로컬에서 리소스를 제한해 측정할 때는 repo 루트의 `Dockerfile`에서 `runtime-stress` target을 빌드한 뒤
+`docker run`에서 CPU 1개, memory 1GB, swap 1GB 제한을 걸어 실행한다.
 
 ```bash
-docker build -t runtime-stress .
-docker run --rm --cpus=1 --memory=1g --memory-swap=1g runtime-stress \
+docker build --target runtime-stress -t rex-runtime-stress:local .
+docker run --rm --cpus=1 --memory=1g --memory-swap=1g rex-runtime-stress:local \
   --scenario full-fill-same-level --warmup-sec 10 --duration-sec 30 \
   --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
 ```
 
 - `--memory-swap`을 `--memory`와 같게 두어 swap이 메모리 제한을 가리지 않게 한다.
+- `docker compose run --rm runtime-stress ...`도 같은 제한을 사용한다.
 - CPU 1개 제한에서는 dispatch 루프, 심볼별 engine thread, result handler가 한 코어를
   공유하므로 스케줄러 대기까지 지연 분포에 포함된다. 이는 제한 환경 측정의 의도된 특성이다.
 - 지연 표본은 명령당 8바이트씩 메모리에 누적된다. 높은 유입률 × 긴 측정 시간 조합은
@@ -274,7 +276,7 @@ docker run --rm --cpus=1 --memory=1g --memory-swap=1g runtime-stress \
 ```
 
 ```bash
-./target/release/runtime_stress --scenario cancel-missing --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 10000 --timeout-sec 30
+docker compose run --rm runtime-stress --scenario cancel-missing --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 10000 --timeout-sec 30
 ```
 
 이 시나리오는 존재하지 않는 주문 취소를 반복하므로 실제 체결, maker 갱신, orderbook sweep 비용을 만들지 않는다.

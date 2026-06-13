@@ -36,7 +36,7 @@ Place/Amend/Cancel 3-command 묶음으로 구성되어 반복 종료 시 orderbo
 대표 실행 명령:
 
 ```bash
-./target/release/runtime_stress --scenario amend-decrease-qty --warmup-sec 10 --duration-sec 30 --target-commands-per-sec <target> --symbols 1 --timeout-sec 30
+docker compose run --rm runtime-stress --scenario amend-decrease-qty --warmup-sec 10 --duration-sec 30 --target-commands-per-sec <target> --symbols 1 --timeout-sec 30
 ```
 
 ## 측정 내역

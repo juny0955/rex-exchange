@@ -42,10 +42,13 @@ Runtime stress와 Integration stress의 공식 기준선과 개선 비교는 로
 
 | 항목 | 값 |
 | --- | --- |
-| Runtime | repo 루트 `Dockerfile`로 빌드한 `runtime_stress` 이미지 |
-| Runtime resource limit | `--cpus=1 --memory=1g --memory-swap=1g` |
-| Integration Kafka | repo 루트 `docker-compose.yml`의 Kafka 브로커 |
-| Integration SUT / load generator | 같은 로컬 Docker 환경의 배치와 실행 옵션을 측정 문서에 기록 |
+| Runtime | repo 루트 `Dockerfile`의 `runtime-stress` target |
+| Runtime resource limit | CPU 1, memory 1GB, swap 1GB |
+| Integration Kafka | repo 루트 `docker-compose.yml`의 `kafka` service |
+| Integration Kafka resource limit | CPU 2, memory 2GB, swap 2GB |
+| Integration SUT | repo 루트 `docker-compose.yml`의 `matching-engine` service |
+| Integration SUT resource limit | CPU 1, memory 1GB, swap 1GB |
+| Integration load generator | repo 루트 `docker-compose.yml`의 `integration-stress` service, 리소스 제한 없음 |
 
 실행 방법은 [Runtime Stress 테스트](./runtime_stress.md)의 "Docker 제한 환경 실행"과
 [Integration Stress 테스트](./integration_stress.md)의 사전 준비 절차를 따른다.

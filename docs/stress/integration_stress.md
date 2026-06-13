@@ -27,19 +27,27 @@ gRPC client -> :50051 tonic server -> EngineDispatcher -> MatchingEngine -> Kafk
 
 `runtime_stress`는 매칭엔진 내부 처리량 한계를 빠르게 보는 데 쓰고, `integration_stress`는 운영에 가까운 종단 지연과 무손실을 검증하는 데 쓴다.
 측정 결과와 기준선은 [Stress 시나리오](./scenarios/README.md) 아래에 시나리오별로 기록한다.
-공식 측정은 로컬 Docker 환경에서 실행한 결과만 기록하며, SUT, Kafka, 부하 생성기의 Docker 배치와 리소스 제한을 측정 문서에 함께 남긴다.
+공식 측정은 로컬 Docker 환경에서 실행한 결과만 기록한다.
+Kafka는 CPU 2개와 memory 2GB, SUT는 CPU 1개와 memory 1GB로 제한하고, 부하 생성기에는 리소스 제한을 걸지 않는다.
 
 ## 사전 준비
 
-이 도구는 외부 의존(Kafka 브로커, 실행 중인 gRPC 서버)이 필요하다. 부하를 걸기 전에 둘 다 로컬 Docker 환경에서 띄워야 한다.
+이 도구는 외부 의존(Kafka 브로커, 실행 중인 gRPC 서버)이 필요하다. 공식 측정에서는 둘 다 repo 루트의 `docker-compose.yml`로 띄운다.
 
-1. Kafka 브로커를 띄운다.
+1. Kafka와 SUT를 띄운다.
 
 ```bash
-docker compose up -d
+docker compose up -d kafka matching-engine
 ```
 
-2. SUT(System Under Test)인 매칭엔진 gRPC 서버를 로컬 Docker 컨테이너로 띄운다. 부하 생성기와 자원이 섞이지 않도록 컨테이너 배치와 리소스 제한을 측정 문서에 기록한다.
+2. 부하 생성기를 같은 compose network에서 실행한다. 부하 생성기에는 리소스 제한을 걸지 않는다.
+
+```bash
+docker compose run --rm integration-stress \
+  --grpc-endpoint http://matching-engine:50051 \
+  --kafka-brokers kafka:9092 \
+  --orders 100 --scenario place-resting-limit --concurrency 16
+```
 
 첫 로컬 Docker 측정 전까지 integration 기준선은 `미측정`으로 둔다.
 
@@ -60,21 +68,22 @@ docker compose up -d
 
 ## 빌드
 
-측정 전 release binary를 먼저 빌드한다.
+호스트에서 개발 확인을 할 때는 release binary를 직접 빌드할 수 있다.
+공식 측정에서는 compose가 `Dockerfile`의 `matching-engine`과 `integration-stress` target을 빌드한다.
 
 ```powershell
 cargo build --release --bin integration_stress
 ```
 
-이후 측정은 `cargo run`보다 binary를 직접 실행하는 편이 좋다. `cargo run`은 Cargo 빌드/실행 로그가 함께 섞인다.
-Windows는 `.exe` 파일을, macOS/Linux는 확장자 없는 binary를 실행한다.
+호스트 참고 실행은 `cargo run`보다 binary를 직접 실행하는 편이 좋다. `cargo run`은 Cargo 빌드/실행 로그가 함께 섞인다.
+Windows 호스트 참고 실행은 `.exe` 파일을 사용하고, 공식 macOS/Linux 측정은 Docker 명령을 사용한다.
 
 ```powershell
 .\target\release\integration_stress.exe --orders 100 --scenario place-resting-limit --concurrency 16
 ```
 
 ```bash
-./target/release/integration_stress --orders 100 --scenario place-resting-limit --concurrency 16
+docker compose run --rm integration-stress --grpc-endpoint http://matching-engine:50051 --kafka-brokers kafka:9092 --orders 100 --scenario place-resting-limit --concurrency 16
 ```
 
 ## 옵션
@@ -147,7 +156,7 @@ unit 하나는 한 번의 워크로드 반복이 만든 command 묶음이다(예
 ```
 
 ```bash
-./target/release/integration_stress --orders 100 --scenario place-resting-limit --concurrency 16
+docker compose run --rm integration-stress --grpc-endpoint http://matching-engine:50051 --kafka-brokers kafka:9092 --orders 100 --scenario place-resting-limit --concurrency 16
 ```
 
 `누락 = 0`, `중복 수신 = 0`, `무손실 판정 = 통과`, `settle 완료 = 예`를 확인한다.
@@ -159,7 +168,7 @@ unit 하나는 한 번의 워크로드 반복이 만든 command 묶음이다(예
 ```
 
 ```bash
-./target/release/integration_stress --duration-sec 30 --target-commands-per-sec 1000 --scenario full-fill-same-level --concurrency 64
+docker compose run --rm integration-stress --grpc-endpoint http://matching-engine:50051 --kafka-brokers kafka:9092 --duration-sec 30 --target-commands-per-sec 1000 --scenario full-fill-same-level --concurrency 64
 ```
 
 3. 목표 유입률을 단계적으로 올려 포화점을 찾는다.
@@ -170,8 +179,8 @@ unit 하나는 한 번의 워크로드 반복이 만든 command 묶음이다(예
 ```
 
 ```bash
-./target/release/integration_stress --duration-sec 30 --warmup-sec 5 --target-commands-per-sec 10000 --scenario full-fill-same-level --concurrency 128
-./target/release/integration_stress --duration-sec 30 --warmup-sec 5 --target-commands-per-sec 50000 --scenario full-fill-same-level --concurrency 128
+docker compose run --rm integration-stress --grpc-endpoint http://matching-engine:50051 --kafka-brokers kafka:9092 --duration-sec 30 --warmup-sec 5 --target-commands-per-sec 10000 --scenario full-fill-same-level --concurrency 128
+docker compose run --rm integration-stress --grpc-endpoint http://matching-engine:50051 --kafka-brokers kafka:9092 --duration-sec 30 --warmup-sec 5 --target-commands-per-sec 50000 --scenario full-fill-same-level --concurrency 128
 ```
 
 다음 신호가 처음 나타나는 지점을 포화점으로 본다.
@@ -187,7 +196,7 @@ unit 하나는 한 번의 워크로드 반복이 만든 command 묶음이다(예
 ```
 
 ```bash
-./target/release/integration_stress --orders 2000 --scenario full-fill-same-level --concurrency 128
+docker compose run --rm integration-stress --grpc-endpoint http://matching-engine:50051 --kafka-brokers kafka:9092 --orders 2000 --scenario full-fill-same-level --concurrency 128
 ```
 
 ## 결과 해석
