@@ -41,4 +41,4 @@ docs/stress/scenarios/<scenario>/
 - 새 runtime 측정은 `scenarios/<scenario>/runtime/measurements/`와 `runtime/raw/`에 같은 날짜/목적 이름으로 추가한다.
 - 새 integration 측정은 `scenarios/<scenario>/integration/measurements/`와 `integration/raw/`에 같은 날짜/목적 이름으로 추가한다.
 - Runtime TPS와 Integration TPS는 측정 경로와 병목이 다르므로 직접 비교하지 않는다.
-- 기준선 문서는 오탈자나 계산 오류를 제외하고 수정하지 않는다.
+- 측정 문서에는 로컬 Docker 환경과 실행 옵션을 함께 기록한다.

@@ -4,7 +4,6 @@
 
 - [Stress 테스트 홈](../../../README.md)
 - [Runtime Stress 테스트](../../../runtime_stress.md)
-- [2026-06-09 기준선](./measurements/2026-06-09_baseline.md)
 
 `place-resting-limit`는 체결되지 않는 GTC limit 주문을 orderbook에 계속 추가하는 시나리오다.
 체결 수와 maker 갱신 수는 발생하지 않지만, 반복 실행 중 잔존 주문 수가 계속 증가하므로 orderbook 상태가 시간에 따라 drift한다.
@@ -13,13 +12,12 @@
 ## 최신 TPS
 
 | 항목 | 값 |
-| --- | ---: |
-| 최신 안정 TPS | 10,000 commands/s |
-| 경계 TPS | 15,000 commands/s |
-| 초과 구간 | 15,000+ commands/s |
+| --- | --- |
+| 최신 안정 TPS | 미측정 |
+| 경계 TPS | 미측정 |
+| 초과 구간 | 미측정 |
 
-최신 안정 TPS는 같은 target/s의 기록된 run이 모두 `채널 포화 = 0`, `완료 여부 = 예`, `발행 결과 ~= 접수 성공`을 만족한 가장 높은 target/s이다.
-이 값은 현 구현의 non-stationary workload 기준 관측값이며, stationary 체결 시나리오의 TPS와 공정 비교하지 않는다.
+로컬 Docker 환경에서 새 측정을 진행한 뒤 이 표를 갱신한다.
 
 ## 고정 실행 조건
 
@@ -36,13 +34,13 @@
 대표 실행 명령:
 
 ```bash
-./target/release/runtime_stress --scenario place-resting-limit --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 10000 --symbols 1 --sweep-depth 10 --timeout-sec 30
+./target/release/runtime_stress --scenario place-resting-limit --warmup-sec 10 --duration-sec 30 --target-commands-per-sec <target> --symbols 1 --sweep-depth 10 --timeout-sec 30
 ```
 
 ## 측정 내역
 
 | 측정 | 안정 TPS | 경계 TPS | raw |
 | --- | ---: | ---: | --- |
-| [2026-06-09 기준선](./measurements/2026-06-09_baseline.md) | 10,000 commands/s | 15,000 commands/s | [raw](./raw/2026-06-09_baseline.log) |
+| 미측정 | - | - | - |
 
 새 측정 결과가 생기면 `measurements/`와 `raw/`에 같은 날짜/목적 이름으로 파일을 추가하고 이 표를 갱신한다.

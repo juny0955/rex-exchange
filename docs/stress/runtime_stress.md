@@ -229,6 +229,12 @@ Windows는 `.exe` 파일을, macOS/Linux는 확장자 없는 binary를 실행한
 | `pacing 지연 횟수` | 목표 command 간격보다 dispatch 루프가 늦어진 횟수 |
 | `초당 접수 성공 수` | dispatch loop 기준 처리량 |
 | `초당 발행 결과 수` | result handler와 publisher까지 포함한 처리량 |
+| `지연 표본 수` | 송신·수신이 매칭되어 지연이 측정된 명령 수. `접수 성공`보다 작으면 결과가 발행되지 않은 명령이 있다는 뜻 |
+| `지연 min/mean/p50/p95/p99/max` | dispatch 접수 성공 시점부터 `CountingPublisher`가 해당 결과를 수신한 시점까지의 명령별 지연 분포 |
+
+지연 분포는 warm-up과 측정 구간이 분리되어 집계된다. `--publisher-delay-ms`를 사용하면
+해당 결과 자체의 인위적 지연은 표본에서 제외되지만, 앞선 결과들의 발행을 기다리는 대기
+시간은 표본에 반영된다.
 
 주요 해석 기준은 아래와 같다.
 
@@ -239,6 +245,25 @@ Windows는 `.exe` 파일을, macOS/Linux는 확장자 없는 binary를 실행한
 - `--publisher-delay-ms`를 조금만 올려도 전체 완료가 밀리면 실제 Kafka publish 지연에 취약할 가능성이 있다.
 - `체결 수`와 `메이커 갱신 수`가 큰 시나리오에서만 급격히 느려지면 trade/result payload 생성 비용을 본다.
 - burst stress 모드에서 높은 `채널 포화`는 순간 유입량 한계를 의미한다. 이를 운영 부하 처리량 부족으로 바로 해석하지 않는다.
+
+## Docker 제한 환경 실행
+
+로컬에서 리소스를 제한해 측정할 때는 repo 루트의 `Dockerfile`로 이미지를 빌드한 뒤
+`--cpus`, `--memory`로 제한을 걸어 실행한다.
+
+```bash
+docker build -t runtime-stress .
+docker run --rm --cpus=1 --memory=1g --memory-swap=1g runtime-stress \
+  --scenario full-fill-same-level --warmup-sec 10 --duration-sec 30 \
+  --target-commands-per-sec 1000 --sweep-depth 10 --timeout-sec 30
+```
+
+- `--memory-swap`을 `--memory`와 같게 두어 swap이 메모리 제한을 가리지 않게 한다.
+- CPU 1개 제한에서는 dispatch 루프, 심볼별 engine thread, result handler가 한 코어를
+  공유하므로 스케줄러 대기까지 지연 분포에 포함된다. 이는 제한 환경 측정의 의도된 특성이다.
+- 지연 표본은 명령당 8바이트씩 메모리에 누적된다. 높은 유입률 × 긴 측정 시간 조합은
+  (예: 1,000,000 commands/s × 30s ≈ 240MB) 메모리 제한에 닿을 수 있으니 주의한다.
+- Apple Silicon에서는 linux/arm64로 네이티브 빌드되므로 `--platform` 지정이 필요 없다.
 
 ## 보조 진단
 

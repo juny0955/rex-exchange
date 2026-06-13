@@ -4,7 +4,6 @@
 
 - [Stress 테스트 홈](../../../README.md)
 - [Runtime Stress 테스트](../../../runtime_stress.md)
-- [2026-06-09 기준선](./measurements/2026-06-09_baseline.md)
 
 `amend-price-change`는 GTC 주문을 넣은 뒤 가격을 바꾸고, 같은 주문 ID를 다시 취소하는 시나리오다.
 가격 변경 정정은 orderbook에서 기존 주문을 제거하고 새 가격 레벨에 다시 넣는 cancel-replace 경로를 탄다.
@@ -13,12 +12,12 @@ Place/Amend/Cancel 3-command 묶음으로 구성되어 반복 종료 시 orderbo
 ## 최신 TPS
 
 | 항목 | 값 |
-| --- | ---: |
-| 최신 안정 TPS | 300,000 commands/s |
-| 경계 TPS | 500,000-700,000 commands/s |
-| 초과 구간 | 800,000+ commands/s |
+| --- | --- |
+| 최신 안정 TPS | 미측정 |
+| 경계 TPS | 미측정 |
+| 초과 구간 | 미측정 |
 
-최신 안정 TPS는 같은 target/s의 기록된 run이 모두 `채널 포화 = 0`, `완료 여부 = 예`, `발행 결과 ~= 접수 성공`을 만족한 가장 높은 target/s이다.
+로컬 Docker 환경에서 새 측정을 진행한 뒤 이 표를 갱신한다.
 
 ## 고정 실행 조건
 
@@ -37,13 +36,13 @@ Place/Amend/Cancel 3-command 묶음으로 구성되어 반복 종료 시 orderbo
 대표 실행 명령:
 
 ```bash
-./target/release/runtime_stress --scenario amend-price-change --warmup-sec 10 --duration-sec 30 --target-commands-per-sec 300000 --symbols 1 --timeout-sec 30
+./target/release/runtime_stress --scenario amend-price-change --warmup-sec 10 --duration-sec 30 --target-commands-per-sec <target> --symbols 1 --timeout-sec 30
 ```
 
 ## 측정 내역
 
 | 측정 | 안정 TPS | 경계 TPS | raw |
 | --- | ---: | ---: | --- |
-| [2026-06-09 Vultr 기준선](./measurements/2026-06-09_baseline.md) | 300,000 commands/s | 500,000-700,000 commands/s | [raw](./raw/2026-06-09_baseline.log) |
+| 미측정 | - | - | - |
 
 새 측정 결과가 생기면 `measurements/`와 `raw/`에 같은 날짜/목적 이름으로 파일을 추가하고 이 표를 갱신한다.

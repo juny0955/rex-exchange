@@ -7,7 +7,7 @@
 - [Runtime 측정](../runtime/README.md)
 
 `full-fill-same-level`의 gRPC 인그레스부터 Kafka 수신까지의 E2E 부하 결과를 기록한다.
-아직 기록된 integration 기준선은 없다.
+아직 기록된 로컬 Docker integration 측정은 없다.
 
 ## 최신 E2E 결과
 
@@ -21,7 +21,7 @@
 
 ## 고정 실행 조건
 
-첫 측정 때 SUT, Kafka, 부하 생성기 배치와 실행 옵션을 기록한다.
+첫 측정 때 로컬 Docker 배치와 실행 옵션을 기록한다.
 
 대표 실행 명령:
 
