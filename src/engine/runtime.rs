@@ -7,7 +7,7 @@ use crate::engine::{
     dispatcher::EngineDispatcher,
     matching_engine::MatchingEngine,
     result::EngineResult,
-    result_handler::{EngineResultHandler, EngineResultPublisher},
+    result_handler::{EngineHealth, EngineResultHandler, EngineResultPublisher},
 };
 
 pub struct EngineRuntime {
@@ -19,9 +19,11 @@ pub struct EngineRuntime {
 impl EngineRuntime {
     pub fn new(symbols: Vec<String>, result_publisher: Box<dyn EngineResultPublisher>) -> Self {
         let (result_tx, result_rx) = crossbeam::channel::bounded::<EngineResult>(1024);
+        let health = EngineHealth::default();
+        let result_health = health.clone();
 
         let result_handle = std::thread::spawn(move || {
-            EngineResultHandler::new(result_rx, result_publisher).run();
+            EngineResultHandler::new(result_rx, result_publisher, result_health).run();
         });
 
         let mut senders = HashMap::new();
@@ -46,7 +48,7 @@ impl EngineRuntime {
             engine_handles.push(handle);
         }
 
-        let dispatcher = EngineDispatcher::new(senders);
+        let dispatcher = EngineDispatcher::new(senders, health);
 
         Self {
             dispatcher,

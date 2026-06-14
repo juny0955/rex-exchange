@@ -41,6 +41,7 @@ pub(super) fn dispatch_command(
         Err(DispatchError::ChannelFull { .. }) => stats.channel_full += 1,
         Err(DispatchError::UnknownSymbol { .. }) => stats.unknown_symbol += 1,
         Err(DispatchError::EngineStopped { .. }) => stats.engine_stopped += 1,
+        Err(DispatchError::PublisherUnhealthy { .. }) => stats.engine_stopped += 1,
     }
 }
 

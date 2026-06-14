@@ -1,4 +1,4 @@
-use crate::engine::command::EngineCommand;
+use crate::engine::{command::EngineCommand, result_handler::EngineHealth};
 use crossbeam::channel::{Sender, TrySendError};
 use std::collections::HashMap;
 use tracing::error;
@@ -9,20 +9,33 @@ pub enum DispatchError {
     UnknownSymbol { symbol: String, order_id: Uuid },
     EngineStopped { symbol: String, order_id: Uuid },
     ChannelFull { symbol: String, order_id: Uuid },
+    PublisherUnhealthy { symbol: String, order_id: Uuid },
 }
 
 #[derive(Debug, Clone)]
 pub struct EngineDispatcher {
     senders: HashMap<String, Sender<EngineCommand>>,
+    health: EngineHealth,
 }
 
 impl EngineDispatcher {
-    pub(crate) fn new(senders: HashMap<String, Sender<EngineCommand>>) -> Self {
-        Self { senders }
+    pub(crate) fn new(
+        senders: HashMap<String, Sender<EngineCommand>>,
+        health: EngineHealth,
+    ) -> Self {
+        Self { senders, health }
     }
 
     pub fn dispatch(&self, symbol: &str, cmd: EngineCommand) -> Result<(), DispatchError> {
         let order_id = cmd.order_id();
+        if !self.health.is_publisher_healthy() {
+            error!(symbol = symbol, order_id = %order_id, "결과 발행기 비정상 상태");
+            return Err(DispatchError::PublisherUnhealthy {
+                symbol: symbol.to_string(),
+                order_id,
+            });
+        }
+
         let Some(sender) = self.senders.get(symbol) else {
             error!(symbol = symbol, order_id = %order_id, "등록되지 않은 심볼");
             return Err(DispatchError::UnknownSymbol {
@@ -69,11 +82,14 @@ mod tests {
         let mut senders = HashMap::new();
         senders.insert(SYMBOL.to_string(), engine_tx);
 
-        (EngineDispatcher::new(senders), engine_rx)
+        (
+            EngineDispatcher::new(senders, EngineHealth::default()),
+            engine_rx,
+        )
     }
 
     fn make_cmd() -> EngineCommand {
-        EngineCommand::Cancel(Uuid::now_v7())
+        EngineCommand::generated_cancel(Uuid::now_v7())
     }
 
     #[test]

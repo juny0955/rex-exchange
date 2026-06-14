@@ -180,6 +180,9 @@ fn map_dispatch_error(error: DispatchError) -> Status {
         DispatchError::ChannelFull { symbol, order_id } => Status::resource_exhausted(format!(
             "엔진 포화 상태: symbol={symbol}, order_id={order_id}"
         )),
+        DispatchError::PublisherUnhealthy { symbol, order_id } => Status::unavailable(format!(
+            "결과 발행기 비정상 상태: symbol={symbol}, order_id={order_id}"
+        )),
     }
 }
 
