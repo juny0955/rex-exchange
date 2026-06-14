@@ -2,11 +2,11 @@
 //! 변환은 순수 함수로 분리해 네트워크 없이 단위 테스트가 가능하다.
 
 use matching_engine::{
-    domain::order::{Order, OrderSize, Side, TimeInForce},
+    domain::order::{OrderSize, Side, TimeInForce},
     engine::command::{AmendOrderCommand, EngineCommand},
     grpc::engine::{
-        AmendOrderRequest, CancelOrderRequest, Command, OrderType as ProtoOrderType,
-        PlaceOrderRequest, Side as ProtoSide, SubmitBatchRequest, SubmitStatus,
+        AckStatus, AmendOrderRequest, CancelOrderRequest, Command, CommandAck,
+        OrderType as ProtoOrderType, PlaceOrderRequest, Side as ProtoSide, SubmitBatchRequest,
         TimeInForce as ProtoTimeInForce, command,
         matching_engine_service_client::MatchingEngineServiceClient, place_order_request::Size,
     },
@@ -67,9 +67,9 @@ pub async fn send_batch(
         Ok(response) => {
             let mut outcomes: Vec<SendOutcome> = response
                 .into_inner()
-                .results
+                .acks
                 .iter()
-                .map(|result| classify_status(result.status))
+                .map(classify_ack)
                 .collect();
             // 응답 결과 수가 요청보다 적으면 부족분은 에러로 본다.
             if outcomes.len() < commands.len() {
@@ -81,10 +81,10 @@ pub async fn send_batch(
     }
 }
 
-pub fn classify_status(status: i32) -> SendOutcome {
-    if status == SubmitStatus::Submitted as i32 {
+pub fn classify_ack(ack: &CommandAck) -> SendOutcome {
+    if ack.status == AckStatus::Accepted as i32 {
         SendOutcome::Submitted
-    } else if status == SubmitStatus::ResourceExhausted as i32 {
+    } else if ack.status == AckStatus::ResourceExhausted as i32 {
         SendOutcome::ResourceExhausted
     } else {
         SendOutcome::Rejected
@@ -93,9 +93,9 @@ pub fn classify_status(status: i32) -> SendOutcome {
 
 pub fn to_proto_command(symbol: &str, command: &EngineCommand) -> Command {
     let inner = match command {
-        EngineCommand::Place(order) => command::Command::Place(place_request(order)),
-        EngineCommand::Cancel(order_id) => {
-            command::Command::Cancel(cancel_request(*order_id, symbol))
+        EngineCommand::Place(command) => command::Command::Place(place_request(command)),
+        EngineCommand::Cancel(command) => {
+            command::Command::Cancel(cancel_request(command.command_id, command.order_id, symbol))
         }
         EngineCommand::Amend(cmd) => command::Command::Amend(amend_request(cmd, symbol)),
     };
@@ -104,13 +104,17 @@ pub fn to_proto_command(symbol: &str, command: &EngineCommand) -> Command {
     }
 }
 
-pub fn place_request(order: &Order) -> PlaceOrderRequest {
+pub fn place_request(
+    command: &matching_engine::engine::command::PlaceOrderCommand,
+) -> PlaceOrderRequest {
+    let order = &command.order;
     let size = match order.size {
         OrderSize::Base(qty) => Size::BaseQty(qty.to_string()),
         OrderSize::Quote(quote) => Size::QuoteQty(quote.to_string()),
     };
 
     PlaceOrderRequest {
+        command_id: command.command_id.to_string(),
         order_id: order.order_id.to_string(),
         symbol: order.symbol.clone(),
         side: side_to_proto(order.side),
@@ -121,8 +125,9 @@ pub fn place_request(order: &Order) -> PlaceOrderRequest {
     }
 }
 
-pub fn cancel_request(order_id: Uuid, symbol: &str) -> CancelOrderRequest {
+pub fn cancel_request(command_id: Uuid, order_id: Uuid, symbol: &str) -> CancelOrderRequest {
     CancelOrderRequest {
+        command_id: command_id.to_string(),
         order_id: order_id.to_string(),
         symbol: symbol.to_string(),
     }
@@ -130,6 +135,7 @@ pub fn cancel_request(order_id: Uuid, symbol: &str) -> CancelOrderRequest {
 
 pub fn amend_request(cmd: &AmendOrderCommand, symbol: &str) -> AmendOrderRequest {
     AmendOrderRequest {
+        command_id: cmd.command_id.to_string(),
         order_id: cmd.order_id.to_string(),
         symbol: symbol.to_string(),
         new_price: cmd.price.map(|p| p.to_string()),

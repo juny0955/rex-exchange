@@ -63,8 +63,8 @@ fn make_workload(
     next_order_no: &mut usize,
 ) -> Vec<EngineCommand> {
     match scenario {
-        Scenario::CancelMissing => vec![EngineCommand::Cancel(next_order_id(next_order_no))],
-        Scenario::PlaceRestingLimit => vec![EngineCommand::Place(make_limit_order(
+        Scenario::CancelMissing => vec![cancel(next_order_id(next_order_no))],
+        Scenario::PlaceRestingLimit => vec![place(make_limit_order(
             next_order_id(next_order_no),
             symbol,
             Side::Buy,
@@ -76,7 +76,7 @@ fn make_workload(
             let mut commands = Vec::with_capacity(sweep_depth + 1);
 
             for _ in 0..sweep_depth {
-                commands.push(EngineCommand::Place(make_limit_order(
+                commands.push(place(make_limit_order(
                     next_order_id(next_order_no),
                     symbol,
                     Side::Sell,
@@ -86,7 +86,7 @@ fn make_workload(
                 )));
             }
 
-            commands.push(EngineCommand::Place(make_limit_order(
+            commands.push(place(make_limit_order(
                 next_order_id(next_order_no),
                 symbol,
                 Side::Buy,
@@ -103,7 +103,7 @@ fn make_workload(
             for index in 0..sweep_depth {
                 let price = 100 + (index % 50) as i64;
                 quote += price;
-                commands.push(EngineCommand::Place(make_limit_order(
+                commands.push(place(make_limit_order(
                     next_order_id(next_order_no),
                     symbol,
                     Side::Sell,
@@ -113,7 +113,7 @@ fn make_workload(
                 )));
             }
 
-            commands.push(EngineCommand::Place(make_market_quote_buy_order(
+            commands.push(place(make_market_quote_buy_order(
                 next_order_id(next_order_no),
                 symbol,
                 quote,
@@ -124,7 +124,7 @@ fn make_workload(
             let mut commands = Vec::with_capacity(sweep_depth + 1);
 
             for _ in 0..sweep_depth {
-                commands.push(EngineCommand::Place(make_limit_order(
+                commands.push(place(make_limit_order(
                     next_order_id(next_order_no),
                     symbol,
                     Side::Sell,
@@ -134,7 +134,7 @@ fn make_workload(
                 )));
             }
 
-            commands.push(EngineCommand::Place(make_limit_order(
+            commands.push(place(make_limit_order(
                 next_order_id(next_order_no),
                 symbol,
                 Side::Buy,
@@ -151,7 +151,7 @@ fn make_workload(
             for _ in 0..sweep_depth {
                 let order_id = next_order_id(next_order_no);
                 order_ids.push(order_id);
-                commands.push(EngineCommand::Place(make_limit_order(
+                commands.push(place(make_limit_order(
                     order_id,
                     symbol,
                     Side::Buy,
@@ -161,13 +161,13 @@ fn make_workload(
                 )));
             }
 
-            commands.extend(order_ids.into_iter().map(EngineCommand::Cancel));
+            commands.extend(order_ids.into_iter().map(cancel));
             commands
         }
         Scenario::AmendDecreaseQty => {
             let order_id = next_order_id(next_order_no);
             vec![
-                EngineCommand::Place(make_limit_order(
+                place(make_limit_order(
                     order_id,
                     symbol,
                     Side::Buy,
@@ -175,14 +175,14 @@ fn make_workload(
                     10_000,
                     2,
                 )),
-                EngineCommand::Amend(make_amend_order_command(order_id, 10_000, 1)),
-                EngineCommand::Cancel(order_id),
+                amend(make_amend_order_command(order_id, 10_000, 1)),
+                cancel(order_id),
             ]
         }
         Scenario::AmendPriceChange => {
             let order_id = next_order_id(next_order_no);
             vec![
-                EngineCommand::Place(make_limit_order(
+                place(make_limit_order(
                     order_id,
                     symbol,
                     Side::Buy,
@@ -190,11 +190,23 @@ fn make_workload(
                     10_000,
                     1,
                 )),
-                EngineCommand::Amend(make_amend_order_command(order_id, 10_001, 1)),
-                EngineCommand::Cancel(order_id),
+                amend(make_amend_order_command(order_id, 10_001, 1)),
+                cancel(order_id),
             ]
         }
     }
+}
+
+fn place(order: Order) -> EngineCommand {
+    EngineCommand::generated_place(order)
+}
+
+fn cancel(order_id: Uuid) -> EngineCommand {
+    EngineCommand::generated_cancel(order_id)
+}
+
+fn amend(command: AmendOrderCommand) -> EngineCommand {
+    EngineCommand::Amend(command)
 }
 
 fn next_order_id(next_order_no: &mut usize) -> Uuid {
@@ -245,6 +257,7 @@ fn make_market_quote_buy_order(order_id: Uuid, symbol: &str, quote: i64) -> Orde
 
 fn make_amend_order_command(order_id: Uuid, price: i64, qty: i64) -> AmendOrderCommand {
     AmendOrderCommand {
+        command_id: Uuid::now_v7(),
         order_id,
         price: Some(Decimal::new(price, 0)),
         base_qty: Some(Decimal::new(qty, 0)),
