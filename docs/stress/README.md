@@ -82,15 +82,16 @@ Runtime stress와 Integration stress의 공식 기준선과 개선 비교는 로
 | `full-fill-same-level` | [2026-06-13 baseline](./scenarios/full-fill-same-level/integration/measurements/2026-06-13_baseline.md) | 11 | 100,000 | 120,000 | 150,000+ | 22.910ms | 통과 |
 | `market-quote-sweep` | [2026-06-13 baseline](./scenarios/market-quote-sweep/integration/measurements/2026-06-13_baseline.md) | 11 | 80,000 | 100,000 | 130,000+ | 14.511ms | 통과(≤100k) / 실패(130k) |
 | `partial-fill-rest` | [2026-06-13 baseline](./scenarios/partial-fill-rest/integration/measurements/2026-06-13_baseline.md) | 11 | 100,000 | 120,000 | 150,000+ | 21.174ms | 통과 |
-| `place-resting-limit` | [2026-06-13 baseline](./scenarios/place-resting-limit/integration/measurements/2026-06-13_baseline.md) | 1 | 25,000 | 40,000 | 50,000+ | 8.281ms | 통과 |
-| `cancel-resting-order` | [2026-06-13 baseline](./scenarios/cancel-resting-order/integration/measurements/2026-06-13_baseline.md) | 20 | 10,000 | 15,000 | 30,000+ | 8.777ms | 통과 |
-| `amend-decrease-qty` | [2026-06-13 baseline](./scenarios/amend-decrease-qty/integration/measurements/2026-06-13_baseline.md) | 3 | 20,000 | 25,000 | 30,000+ | 8.294ms | 통과 |
-| `amend-price-change` | [2026-06-13 baseline](./scenarios/amend-price-change/integration/measurements/2026-06-13_baseline.md) | 3 | 5,000 | 10,000 | 20,000+ | 8.113ms | 통과 |
+| `place-resting-limit` | [2026-06-14 baseline-reset](./scenarios/place-resting-limit/integration/measurements/2026-06-14_baseline-reset.md) | 1 | 25,000 | 40,000 | 50,000+ | 8.620ms | 통과 |
+| `cancel-resting-order` | [2026-06-14 baseline-reset](./scenarios/cancel-resting-order/integration/measurements/2026-06-14_baseline-reset.md) | 20 | 100,000 | 150,000 | 200,000+ | 10.217ms | 통과 |
+| `amend-decrease-qty` | [2026-06-14 baseline-reset](./scenarios/amend-decrease-qty/integration/measurements/2026-06-14_baseline-reset.md) | 3 | 50,000 | 75,000 | 100,000+ | 10.769ms | 통과 |
+| `amend-price-change` | [2026-06-14 baseline-reset](./scenarios/amend-price-change/integration/measurements/2026-06-14_baseline-reset.md) | 3 | 75,000 | 100,000 | 130,000+ | 9.656ms | 통과 |
 
 - commands/unit=11(`full-fill-same-level`, `market-quote-sweep`, `partial-fill-rest`)이 batch RPC 효과를 가장 크게 받아 안전 TPS가 80k~100k로 가장 높다.
-- commands/unit=1(`place-resting-limit`)은 batch RPC가 RPC 콜 수를 줄이지 못해 안전 TPS가 25,000에 그치고, 포화도 503이 아닌 target 미달성(pacing 지연) 형태로 나타난다.
-- commands/unit=20(`cancel-resting-order`)은 batch RPC 콜 절감 효과는 가장 크지만 단일 RPC가 채널에 던지는 명령 burst(512 units × 20)도 가장 커서 안전 TPS가 가장 낮다(10,000).
-- commands/unit=3인 `amend-decrease-qty`(안전 20,000)와 `amend-price-change`(안전 5,000)는 commands/unit이 같아도 엔진 처리 비용(in-place 수량 갱신 vs cancel-replace 가격 레벨 이동) 차이로 안전선이 약 4배 차이난다.
+- commands/unit=1(`place-resting-limit`)은 batch RPC가 RPC 콜 수를 줄이지 못해 안전 TPS가 25,000에 그치고, 포화도 503이 아닌 target 미달성(pacing 지연) 형태로 나타난다. 이 시나리오는 가격 `10,000~10,049`에 미체결 주문을 계속 누적시키지만 insert-only이므로 자신의 잔존 주문 누적이 안전 TPS에 영향을 주지 않는다(오더북 초기화 전후 결과 동일, 컨트롤 그룹).
+- `cancel-resting-order`(commands/unit=20), `amend-decrease-qty`/`amend-price-change`(commands/unit=3)는 모두 가격 `10,000`/`10,001` 부근에서 동작한다. 2026-06-13 측정은 `place-resting-limit` 실행이 같은 가격대(10,000~10,049)에 남긴 잔존 주문 위에서 진행되어 안전 TPS가 각각 10,000/20,000/5,000으로 비정상적으로 낮게 나왔다. 매 실행 전 `docker compose restart matching-engine`으로 오더북을 초기화한 2026-06-14 재측정에서는 100,000/50,000/75,000으로 5~15배 상승했다.
+- 클린 오더북에서는 `cancel-resting-order`(commands/unit=20, 안전 100,000)가 commands/unit=11 계열과 동등한 수준에 도달한다 — batch RPC의 콜 절감 효과가 burst 크기(512 units × 20)에 의한 채널 백프레셔를 상쇄한다.
+- `amend-decrease-qty`(안전 50,000)와 `amend-price-change`(안전 75,000)는 commands/unit이 동일(3)함에도 안전선이 1.5배 차이난다. 두 시나리오 모두 unit 종료 시점에는 주문을 cancel해 오더북에 남기지 않지만, `amend-decrease-qty`는 동시 in-flight 주문이 모두 가격 `10,000` 한 레벨에 몰리는 반면 `amend-price-change`는 `10,000`(amend 전)과 `10,001`(amend 후) 두 레벨로 분산된다 — 가격 레벨당 동시 주문 수가 적을수록 레벨 내 탐색/취소 비용이 낮아져 안전 TPS가 더 높게 나오는 것으로 추정된다.
 
 ## 운영 규칙
 
@@ -99,3 +100,4 @@ Runtime stress와 Integration stress의 공식 기준선과 개선 비교는 로
 - 개선 후 측정은 새 문서로 추가하고, 기준선 대비 변화율을 기록한다.
 - Runtime 측정의 `완료 여부 = 예`는 접수된 command만 완료됐다는 뜻이며, 거부된 command까지 처리됐다는 뜻이 아니다.
 - Integration 측정의 `무손실 판정 = 통과`는 접수 성공한 명령이 Kafka 이벤트로 정확히 한 번 수신됐다는 뜻이다.
+- `matching-engine`은 volume 없는 in-memory 프로세스로, `docker compose run --rm integration-stress ...`의 `--rm`은 부하 생성기 컨테이너만 제거하고 엔진은 계속 살아남아 오더북 상태가 다음 실행으로 이어진다. 잔존 주문을 남기는 시나리오(`place-resting-limit`, `cancel-resting-order`, `amend-decrease-qty`, `amend-price-change` 등)나 동일 시나리오를 여러 target rate로 반복 측정할 때는, 매 개별 실행 전 `docker compose restart matching-engine` 후 healthy 대기로 오더북을 초기화한다(절차: [Integration Stress 테스트](./integration_stress.md)의 "오더북 초기화" 절).

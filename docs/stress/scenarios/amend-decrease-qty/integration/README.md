@@ -12,11 +12,11 @@
 
 | 항목 | 값 |
 | --- | --- |
-| 최신 측정 | [2026-06-13 baseline](./measurements/2026-06-13_baseline.md) |
-| 최신 안전 TPS | 20,000 |
-| 경계 TPS | 25,000 |
-| 포화 TPS | 30,000+ |
-| 대표 p99 지연 (E2E, 20k) | 8.294ms |
+| 최신 측정 | [2026-06-14 baseline-reset](./measurements/2026-06-14_baseline-reset.md) |
+| 최신 안전 TPS | 50,000 |
+| 경계 TPS | 75,000 |
+| 포화 TPS | 100,000+ |
+| 대표 p99 지연 (E2E, 50k) | 10.769ms |
 | 무손실 판정 | 통과 |
 
 ## 고정 실행 조건
@@ -28,12 +28,15 @@
 | 전송 방식 | `SubmitBatch` (unit 전체를 batch RPC 1콜로 전송) |
 | 심볼 수 | `1` |
 | 스윕 깊이 | `10` |
+| 오더북 초기화 | 매 target rate 실행 전 `docker compose restart matching-engine` 후 healthy 대기 |
 | warm-up 시간 | `5s` |
 | settle 제한 시간 | `15s` |
 
 대표 실행 명령:
 
 ```bash
+docker compose restart matching-engine
+# matching-engine이 healthy 상태가 될 때까지 대기 후 실행
 docker compose run --rm integration-stress --grpc-endpoint http://matching-engine:50051 --kafka-brokers kafka:9092 --scenario amend-decrease-qty --warmup-sec 5 --duration-sec 30 --target-commands-per-sec <target> --symbols 1 --sweep-depth 10 --concurrency 512 --connections 16 --settle-timeout-sec 15
 ```
 
@@ -41,4 +44,5 @@ docker compose run --rm integration-stress --grpc-endpoint http://matching-engin
 
 | 측정 | 안전 TPS | 경계 TPS | 포화 TPS | 대표 p99 지연(E2E) | 무손실 | raw |
 | --- | ---: | ---: | ---: | ---: | --- | --- |
-| [2026-06-13 baseline](./measurements/2026-06-13_baseline.md) | 20,000 | 25,000 | 30,000+ | 8.294ms | 통과 | [raw](./raw/2026-06-13_baseline.log) |
+| [2026-06-14 baseline-reset](./measurements/2026-06-14_baseline-reset.md) | 50,000 | 75,000 | 100,000+ | 10.769ms | 통과 | [raw](./raw/2026-06-14_baseline-reset.log) |
+| [2026-06-13 baseline (오더북 오염 상태)](./measurements/2026-06-13_baseline.md) | 20,000 | 25,000 | 30,000+ | 8.294ms | 통과 | [raw](./raw/2026-06-13_baseline.log) |

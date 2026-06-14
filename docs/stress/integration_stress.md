@@ -55,6 +55,27 @@ docker compose run --rm integration-stress \
 컨슈머는 매 실행마다 고유 `group.id`를 쓰고 `auto.offset.reset=latest`로 시작하므로,
 토픽에 남아 있는 이전 실행 이벤트는 읽지 않고 이번 실행에서 새로 발행된 이벤트만 측정한다.
 
+## 오더북 초기화
+
+`matching-engine` 컨테이너는 `docker compose up -d` 이후 여러 번의 `docker compose run --rm integration-stress`
+실행 동안 계속 살아있는 단일 in-memory 프로세스다. `--rm`은 부하 생성기 컨테이너만 제거하며, 엔진이 보유한
+오더북(특히 GTC로 체결되지 않고 남는 주문)은 다음 실행에도 그대로 누적된다.
+
+다음 경우에는 측정 직전에 오더북을 초기화해야 한다.
+
+- 시나리오가 체결되지 않는 주문을 오더북에 남긴다(`place-resting-limit`, `partial-fill-rest`의 잔존 taker 등).
+- 같은 시나리오를 target rate를 바꿔가며 반복 측정한다. 이전 실행이 남긴 잔존 주문이 다음 실행의 같은 가격대
+  처리 비용에 영향을 줄 수 있다.
+
+`matching-engine`은 볼륨 없는 순수 in-memory 프로세스이므로 컨테이너 재시작만으로 오더북이 비워진다.
+
+```bash
+docker compose restart matching-engine
+```
+
+재시작 후 `50051` 포트가 다시 수신 가능해질 때까지 몇 초 대기한 뒤 `docker compose run --rm integration-stress ...`를
+실행한다.
+
 ## 테스트 모드
 
 `runtime_stress`와 동일하게 두 가지 모드를 지원한다.
