@@ -5,14 +5,15 @@ use uuid::Uuid;
 
 use crate::{
     domain::order::{self, Order},
-    engine::command::{AmendOrderCommand, EngineCommand},
+    engine::command::{AmendOrderCommand, CancelOrderCommand, EngineCommand, PlaceOrderCommand},
     grpc::engine::{
         AmendOrderRequest, CancelOrderRequest, OrderType, PlaceOrderRequest, Side, TimeInForce,
         place_order_request::Size,
     },
 };
 
-pub fn map_place_order_request(request: PlaceOrderRequest) -> Result<Order, Status> {
+pub fn map_place_order_request(request: PlaceOrderRequest) -> Result<PlaceOrderCommand, Status> {
+    let command_id = parse_uuid(&request.command_id, "command_id")?;
     let order_id = Uuid::parse_str(&request.order_id)
         .map_err(|_| Status::invalid_argument("order_id 형식이 올바르지 않습니다"))?;
 
@@ -59,36 +60,42 @@ pub fn map_place_order_request(request: PlaceOrderRequest) -> Result<Order, Stat
         ));
     }
 
-    Ok(Order {
-        order_id,
-        symbol: request.symbol,
-        side,
-        order_type,
-        tif,
-        price,
-        size,
-        executed_base_qty: Decimal::ZERO,
-        executed_quote_qty: Decimal::ZERO,
-        status: order::OrderStatus::New,
-        created_at: Utc::now(),
-        updated_at: Utc::now(),
+    Ok(PlaceOrderCommand {
+        command_id,
+        order: Order {
+            order_id,
+            symbol: request.symbol,
+            side,
+            order_type,
+            tif,
+            price,
+            size,
+            executed_base_qty: Decimal::ZERO,
+            executed_quote_qty: Decimal::ZERO,
+            status: order::OrderStatus::New,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        },
     })
 }
 
 pub fn map_cancel_order_request(request: CancelOrderRequest) -> Result<EngineCommand, Status> {
-    let order_id = Uuid::parse_str(&request.order_id)
-        .map_err(|_| Status::invalid_argument("order_id 형식이 올바르지 않습니다"))?;
+    let command_id = parse_uuid(&request.command_id, "command_id")?;
+    let order_id = parse_uuid(&request.order_id, "order_id")?;
 
     if request.symbol.is_empty() {
         return Err(Status::invalid_argument("symbol은 필수입니다"));
     }
 
-    Ok(EngineCommand::Cancel(order_id))
+    Ok(EngineCommand::Cancel(CancelOrderCommand {
+        command_id,
+        order_id,
+    }))
 }
 
 pub fn map_amend_order_request(request: AmendOrderRequest) -> Result<EngineCommand, Status> {
-    let order_id = Uuid::parse_str(&request.order_id)
-        .map_err(|_| Status::invalid_argument("order_id 형식이 올바르지 않습니다"))?;
+    let command_id = parse_uuid(&request.command_id, "command_id")?;
+    let order_id = parse_uuid(&request.order_id, "order_id")?;
 
     if request.symbol.is_empty() {
         return Err(Status::invalid_argument("symbol은 필수입니다"));
@@ -111,10 +118,16 @@ pub fn map_amend_order_request(request: AmendOrderRequest) -> Result<EngineComma
     }
 
     Ok(EngineCommand::Amend(AmendOrderCommand {
+        command_id,
         order_id,
         price,
         base_qty,
     }))
+}
+
+fn parse_uuid(raw: &str, field: &str) -> Result<Uuid, Status> {
+    Uuid::parse_str(raw)
+        .map_err(|_| Status::invalid_argument(format!("{field} 형식이 올바르지 않습니다")))
 }
 
 fn map_side(value: i32) -> Result<order::Side, Status> {

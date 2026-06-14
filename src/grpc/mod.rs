@@ -1,3 +1,4 @@
+mod ack;
 pub mod engine {
     tonic::include_proto!("engine.v1");
 }

@@ -1,23 +1,56 @@
+use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
 use crate::domain::order::{Order, OrderStatus};
 
 #[derive(Debug, Clone)]
-pub enum EngineResult {
-    Place(PlaceOrderResult),
-    Cancel(CancelOrderResult),
-    Amend(AmendOrderResult),
+pub struct EngineResult {
+    pub metadata: EngineResultMetadata,
+    pub body: EngineResultBody,
 }
 
 impl EngineResult {
-    pub fn order_id(&self) -> Uuid {
-        match self {
-            EngineResult::Place(r) => r.taker_order_id,
-            EngineResult::Cancel(r) => r.order_id,
-            EngineResult::Amend(r) => r.order_id,
+    pub fn new(command_id: Uuid, engine_sequence: u64, body: EngineResultBody) -> Self {
+        Self {
+            metadata: EngineResultMetadata {
+                command_id,
+                engine_sequence,
+                processed_at: Utc::now(),
+            },
+            body,
         }
     }
+
+    pub fn order_id(&self) -> Uuid {
+        match &self.body {
+            EngineResultBody::Place(r) => r.taker_order_id,
+            EngineResultBody::Cancel(r) => r.order_id,
+            EngineResultBody::Amend(r) => r.order_id,
+        }
+    }
+
+    pub fn symbol(&self) -> &str {
+        match &self.body {
+            EngineResultBody::Place(r) => &r.symbol,
+            EngineResultBody::Cancel(r) => &r.symbol,
+            EngineResultBody::Amend(r) => &r.symbol,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct EngineResultMetadata {
+    pub command_id: Uuid,
+    pub engine_sequence: u64,
+    pub processed_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone)]
+pub enum EngineResultBody {
+    Place(PlaceOrderResult),
+    Cancel(CancelOrderResult),
+    Amend(AmendOrderResult),
 }
 
 #[derive(Debug, Clone)]
@@ -105,6 +138,7 @@ impl From<&Order> for OrderSnapshot {
 #[derive(Debug, Clone)]
 pub enum RejectedReason {
     InvalidOrder(String),
+    DuplicateOrderId,
 }
 
 #[derive(Debug, Clone)]

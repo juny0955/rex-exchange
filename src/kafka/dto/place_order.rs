@@ -80,6 +80,7 @@ impl From<&CancelledReason> for CancelledReasonEvent {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RejectedReasonEvent {
     InvalidOrder { message: String },
+    DuplicateOrderId,
 }
 
 impl From<&RejectedReason> for RejectedReasonEvent {
@@ -88,6 +89,7 @@ impl From<&RejectedReason> for RejectedReasonEvent {
             RejectedReason::InvalidOrder(msg) => Self::InvalidOrder {
                 message: msg.clone(),
             },
+            RejectedReason::DuplicateOrderId => Self::DuplicateOrderId,
         }
     }
 }

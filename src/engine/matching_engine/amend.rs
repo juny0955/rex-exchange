@@ -5,7 +5,7 @@ use crate::engine::{
     command::AmendOrderCommand,
     result::{
         AmendOrderOutcome, AmendOrderResult, AmendRejectedReason, CancelOrderOutcome,
-        CancelOrderResult, CancelRejectedReason, EngineResult, OrderSnapshot,
+        CancelOrderResult, CancelRejectedReason, EngineResultBody, OrderSnapshot,
     },
 };
 
@@ -13,12 +13,12 @@ use super::MatchingEngine;
 
 impl MatchingEngine {
     /// 주문 취소
-    pub(super) fn cancel_order(&mut self, order_id: Uuid) -> EngineResult {
+    pub(super) fn cancel_order(&mut self, order_id: Uuid) -> EngineResultBody {
         debug!(symbol = %self.symbol, order_id = %order_id, "주문 취소");
 
         let Some(mut order) = self.orderbook.remove_order(order_id) else {
             warn!(symbol = %self.symbol, order_id = %order_id, "주문 취소 거부: 주문 찾을 수 없음");
-            return EngineResult::Cancel(CancelOrderResult {
+            return EngineResultBody::Cancel(CancelOrderResult {
                 symbol: self.symbol.clone(),
                 order_id,
                 outcome: CancelOrderOutcome::Rejected(CancelRejectedReason::OrderNotFound),
@@ -30,7 +30,7 @@ impl MatchingEngine {
             .cancel()
             .expect("오더북 불변식 위반: 오더북 내 주문은 취소 가능한 상태여야한다");
 
-        EngineResult::Cancel(CancelOrderResult {
+        EngineResultBody::Cancel(CancelOrderResult {
             symbol: self.symbol.clone(),
             order_id,
             outcome: CancelOrderOutcome::Cancelled(OrderSnapshot::from(&order)),
@@ -40,9 +40,9 @@ impl MatchingEngine {
     /// 주문 정정
     /// 수량감소 -> index 직접 변환
     /// 수량증가/가격변경 -> 취소 후 등록
-    pub(super) fn amend_order(&mut self, cmd: AmendOrderCommand) -> EngineResult {
+    pub(super) fn amend_order(&mut self, cmd: AmendOrderCommand) -> EngineResultBody {
         let Some(current_order) = self.orderbook.get_order_mut(&cmd.order_id) else {
-            return EngineResult::Amend(AmendOrderResult {
+            return EngineResultBody::Amend(AmendOrderResult {
                 symbol: self.symbol.clone(),
                 order_id: cmd.order_id,
                 outcome: AmendOrderOutcome::Rejected(AmendRejectedReason::OrderNotFound),
@@ -50,7 +50,7 @@ impl MatchingEngine {
         };
 
         let Ok(amended_order) = current_order.amend(cmd.price, cmd.base_qty) else {
-            return EngineResult::Amend(AmendOrderResult {
+            return EngineResultBody::Amend(AmendOrderResult {
                 symbol: self.symbol.clone(),
                 order_id: cmd.order_id,
                 outcome: AmendOrderOutcome::Rejected(AmendRejectedReason::AmendNotAllowed),
@@ -69,7 +69,7 @@ impl MatchingEngine {
                 .remove_order(cmd.order_id)
                 .expect("검증된 주문이 오더북에 없음");
 
-            return EngineResult::Amend(AmendOrderResult {
+            return EngineResultBody::Amend(AmendOrderResult {
                 symbol: self.symbol.clone(),
                 order_id: cmd.order_id,
                 outcome: AmendOrderOutcome::Amended(OrderSnapshot::from(&amended_order)),
@@ -87,11 +87,11 @@ impl MatchingEngine {
                 .cancel()
                 .expect("오더북 주문은 취소 가능한 상태여야 함");
 
-            let EngineResult::Place(placed) = self.place_order(amended_order) else {
+            let EngineResultBody::Place(placed) = self.place_order(amended_order) else {
                 unreachable!("place 결과만 반환됨");
             };
 
-            return EngineResult::Amend(AmendOrderResult {
+            return EngineResultBody::Amend(AmendOrderResult {
                 symbol: self.symbol.clone(),
                 order_id: cmd.order_id,
                 outcome: AmendOrderOutcome::CancelReplaced {
@@ -103,7 +103,7 @@ impl MatchingEngine {
 
         *current_order = amended_order;
 
-        EngineResult::Amend(AmendOrderResult {
+        EngineResultBody::Amend(AmendOrderResult {
             symbol: self.symbol.clone(),
             order_id: cmd.order_id,
             outcome: AmendOrderOutcome::Amended(OrderSnapshot::from(&*current_order)),

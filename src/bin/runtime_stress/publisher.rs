@@ -5,7 +5,7 @@ use std::{
 };
 
 use matching_engine::engine::{
-    result::EngineResult,
+    result::{EngineResult, EngineResultBody},
     result_handler::{EngineResultPublisher, PublishResult},
 };
 
@@ -49,15 +49,15 @@ impl EngineResultPublisher for CountingPublisher {
             .on_recv(result.order_id(), received_at);
 
         self.stats.add_published();
-        match result {
-            EngineResult::Place(result) => {
+        match &result.body {
+            EngineResultBody::Place(result) => {
                 self.stats
                     .add_place_result(result.trades.len(), result.updated_makers.len());
             }
-            EngineResult::Cancel(_) => {
+            EngineResultBody::Cancel(_) => {
                 self.stats.add_cancel_result();
             }
-            EngineResult::Amend(_) => {
+            EngineResultBody::Amend(_) => {
                 self.stats.add_amend_result();
             }
         }
@@ -69,7 +69,7 @@ impl EngineResultPublisher for CountingPublisher {
 #[cfg(test)]
 mod tests {
     use matching_engine::engine::result::{
-        CancelOrderOutcome, CancelOrderResult, CancelRejectedReason,
+        CancelOrderOutcome, CancelOrderResult, CancelRejectedReason, EngineResultBody,
     };
     use uuid::Uuid;
 
@@ -87,11 +87,15 @@ mod tests {
         recorder.record(order_id, Instant::now());
 
         publisher
-            .publish(&EngineResult::Cancel(CancelOrderResult {
-                symbol: "BTCUSDT".to_string(),
-                order_id,
-                outcome: CancelOrderOutcome::Rejected(CancelRejectedReason::OrderNotFound),
-            }))
+            .publish(&EngineResult::new(
+                Uuid::now_v7(),
+                1,
+                EngineResultBody::Cancel(CancelOrderResult {
+                    symbol: "BTCUSDT".to_string(),
+                    order_id,
+                    outcome: CancelOrderOutcome::Rejected(CancelRejectedReason::OrderNotFound),
+                }),
+            ))
             .expect("publish 실패");
 
         let snapshot = stats.snapshot();

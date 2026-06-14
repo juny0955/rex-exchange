@@ -3,9 +3,9 @@ syntax = "proto3";
 package engine.v1;
 
 service MatchingEngineService {
-    rpc PlaceOrder(PlaceOrderRequest) returns (PlaceOrderResponse);
-    rpc CancelOrder(CancelOrderRequest) returns (CancelOrderResponse);
-    rpc AmendOrder(AmendOrderRequest) returns (AmendOrderResponse);
+    rpc PlaceOrder(PlaceOrderRequest) returns (CommandAck);
+    rpc CancelOrder(CancelOrderRequest) returns (CommandAck);
+    rpc AmendOrder(AmendOrderRequest) returns (CommandAck);
 
     // 여러 명령을 한 RPC로 묶어 콜당 고정비(HTTP/2 스트림/HPACK/응답 인코드)를 분산한다.
     // commands 순서대로 dispatch하므로 한 워크로드 unit 내부 의존성(place→cancel/amend)이 보존된다.
@@ -31,57 +31,65 @@ enum TimeInForce {
     TIME_IN_FORCE_FOK = 3;
 }
 
-enum SubmitStatus {
-    SUBMIT_STATUS_UNSPECIFIED = 0;
-    SUBMIT_STATUS_SUBMITTED = 1;
-    SUBMIT_STATUS_REJECTED = 2;
-    SUBMIT_STATUS_RESOURCE_EXHAUSTED = 3;
-}
-
 message PlaceOrderRequest {
-    string order_id = 1;
-    string symbol = 2;
+    string command_id = 1;
+    string order_id = 2;
+    string symbol = 3;
 
-    Side side = 3;
-    OrderType order_type = 4;
-    TimeInForce tif = 5;
+    Side side = 4;
+    OrderType order_type = 5;
+    TimeInForce tif = 6;
 
-    optional string price = 6;
+    optional string price = 7;
 
     oneof size {
-        string base_qty = 7;
-        string quote_qty = 8;
+        string base_qty = 8;
+        string quote_qty = 9;
     }
 }
 
-message PlaceOrderResponse {
-    string order_id = 1;
-    SubmitStatus status = 2;
-    string message = 3;
-}
-
 message CancelOrderRequest {
-    string order_id = 1;
-    string symbol = 2;
-}
-
-message CancelOrderResponse {
-    string order_id = 1;
-    SubmitStatus status = 2;
-    string message = 3;
+    string command_id = 1;
+    string order_id = 2;
+    string symbol = 3;
 }
 
 message AmendOrderRequest {
-    string order_id = 1;
-    string symbol = 2;
-    optional string new_price = 3;
-    optional string new_base_qty = 4;
+    string command_id = 1;
+    string order_id = 2;
+    string symbol = 3;
+    optional string new_price = 4;
+    optional string new_base_qty = 5;
 }
 
-message AmendOrderResponse {
-    string order_id = 1;
-    SubmitStatus status = 2;
-    string message = 3;
+enum AckStatus {
+    ACK_STATUS_UNSPECIFIED = 0;
+    ACK_STATUS_ACCEPTED = 1;
+    ACK_STATUS_REJECTED = 2;
+    ACK_STATUS_RESOURCE_EXHAUSTED = 3;
+    ACK_STATUS_UNAVAILABLE = 4;
+}
+
+enum AckReason {
+    ACK_REASON_UNSPECIFIED = 0;
+    ACK_REASON_ACCEPTED = 1;
+    ACK_REASON_INVALID_ARGUMENT = 2;
+    ACK_REASON_UNKNOWN_SYMBOL = 3;
+    ACK_REASON_DUPLICATE_ORDER_ID = 4;
+    ACK_REASON_ENGINE_CHANNEL_FULL = 5;
+    ACK_REASON_ENGINE_STOPPED = 6;
+    ACK_REASON_PUBLISHER_UNHEALTHY = 7;
+}
+
+message CommandAck {
+    string command_id = 1;
+    string order_id = 2;
+    string symbol = 3;
+    AckStatus status = 4;
+    AckReason reason = 5;
+    bool retryable = 6;
+    string accepted_at = 7;
+    string detail = 8;
 }
 
 message Command {
@@ -96,12 +104,6 @@ message SubmitBatchRequest {
     repeated Command commands = 1;
 }
 
-message CommandResult {
-    string order_id = 1;
-    SubmitStatus status = 2;
-    string message = 3;
-}
-
 message SubmitBatchResponse {
-    repeated CommandResult results = 1;
+    repeated CommandAck acks = 1;
 }

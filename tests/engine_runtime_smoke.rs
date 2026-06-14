@@ -22,7 +22,7 @@ fn runtime_dispatch_후_shutdown_정상_종료_테스트() {
 
     let order_id = Uuid::now_v7();
     dispatcher
-        .dispatch(SYMBOL, EngineCommand::Cancel(order_id))
+        .dispatch(SYMBOL, EngineCommand::generated_cancel(order_id))
         .expect("engine command dispatch 실패");
     drop(dispatcher);
 

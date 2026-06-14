@@ -4,7 +4,7 @@ use tracing::{debug, error, warn};
 use crate::{
     domain::order::{Order, OrderSize, OrderType, Side, TimeInForce},
     engine::result::{
-        CancelledReason, EngineResult, PlaceOrderOutcome, PlaceOrderResult, RejectedReason,
+        CancelledReason, EngineResultBody, PlaceOrderOutcome, PlaceOrderResult, RejectedReason,
     },
 };
 
@@ -12,7 +12,7 @@ use super::{MatchingEngine, matching::MatchResult};
 
 impl MatchingEngine {
     /// 주문 접수
-    pub(super) fn place_order(&mut self, taker: Order) -> EngineResult {
+    pub(super) fn place_order(&mut self, taker: Order) -> EngineResultBody {
         debug!(
             symbol = %self.symbol,
             order_id = %taker.order_id,
@@ -25,7 +25,7 @@ impl MatchingEngine {
         );
 
         if let Some(outcome) = self.validate_before_matching(&taker) {
-            return EngineResult::Place(PlaceOrderResult {
+            return EngineResultBody::Place(PlaceOrderResult {
                 symbol: self.symbol.clone(),
                 taker_order_id: taker.order_id,
                 outcome,
@@ -43,9 +43,17 @@ impl MatchingEngine {
         let outcome = resolve_place_outcome(taker.is_filled(), !trades.is_empty(), taker.tif);
 
         let taker_order_id = taker.order_id;
-        self.add_to_orderbook_if_remaining(taker);
+        if let Some(outcome) = self.add_to_orderbook_if_remaining(taker) {
+            return EngineResultBody::Place(PlaceOrderResult {
+                symbol: self.symbol.clone(),
+                taker_order_id,
+                outcome,
+                trades,
+                updated_makers,
+            });
+        }
 
-        EngineResult::Place(PlaceOrderResult {
+        EngineResultBody::Place(PlaceOrderResult {
             symbol: self.symbol.clone(),
             taker_order_id,
             outcome,
@@ -54,9 +62,9 @@ impl MatchingEngine {
         })
     }
 
-    fn add_to_orderbook_if_remaining(&mut self, taker: Order) {
+    fn add_to_orderbook_if_remaining(&mut self, taker: Order) -> Option<PlaceOrderOutcome> {
         if taker.is_filled() || !matches!(taker.tif, TimeInForce::GTC) {
-            return;
+            return None;
         }
 
         debug!(
@@ -67,7 +75,13 @@ impl MatchingEngine {
             "오더북 등록"
         );
 
-        self.orderbook.add_order(taker);
+        if self.orderbook.add_order(taker).is_err() {
+            return Some(PlaceOrderOutcome::Rejected(
+                RejectedReason::DuplicateOrderId,
+            ));
+        }
+
+        None
     }
 
     fn validate_before_matching(&self, taker: &Order) -> Option<PlaceOrderOutcome> {

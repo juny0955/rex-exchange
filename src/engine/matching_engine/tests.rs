@@ -7,7 +7,8 @@ use uuid::Uuid;
 use crate::domain::order::{Order, OrderSize, OrderStatus, OrderType, Side, TimeInForce};
 use crate::engine::command::AmendOrderCommand;
 use crate::engine::result::{
-    AmendOrderOutcome, AmendRejectedReason, CancelOrderOutcome, CancelRejectedReason, EngineResult,
+    AmendOrderOutcome, AmendRejectedReason, CancelOrderOutcome, CancelRejectedReason,
+    EngineResultBody,
 };
 
 fn make_engine() -> MatchingEngine {
@@ -51,12 +52,26 @@ fn market_quote_order(side: Side, quote: i64) -> Order {
     }
 }
 
+fn amend_command(
+    order_id: Uuid,
+    price: Option<Decimal>,
+    base_qty: Option<Decimal>,
+) -> AmendOrderCommand {
+    AmendOrderCommand {
+        command_id: Uuid::now_v7(),
+        order_id,
+        price,
+        base_qty,
+    }
+}
+
 #[test]
 fn 매수_매도_완전_체결_테스트() {
     let mut engine = make_engine();
     engine
         .orderbook
-        .add_order(limit_order(Side::Sell, TimeInForce::GTC, 100, 10));
+        .add_order(limit_order(Side::Sell, TimeInForce::GTC, 100, 10))
+        .unwrap();
 
     engine.place_order(limit_order(Side::Buy, TimeInForce::GTC, 100, 10));
 
@@ -68,7 +83,8 @@ fn fok_잔량_부족시_취소_테스트() {
     let mut engine = make_engine();
     engine
         .orderbook
-        .add_order(limit_order(Side::Sell, TimeInForce::GTC, 100, 5));
+        .add_order(limit_order(Side::Sell, TimeInForce::GTC, 100, 5))
+        .unwrap();
 
     // FOK Buy 10, 잔량 5만 존재 → 취소
     engine.place_order(limit_order(Side::Buy, TimeInForce::FOK, 100, 10));
@@ -92,7 +108,8 @@ fn 시장가_quote_매수_체결_테스트() {
     // SELL 10 BTC @ 100 = 총 1000 USDT
     engine
         .orderbook
-        .add_order(limit_order(Side::Sell, TimeInForce::GTC, 100, 10));
+        .add_order(limit_order(Side::Sell, TimeInForce::GTC, 100, 10))
+        .unwrap();
 
     // MARKET BUY 400 USDT → 4 BTC 체결
     engine.place_order(market_quote_order(Side::Buy, 400));
@@ -128,7 +145,8 @@ fn ioc_잔존_주문_미등록_테스트() {
     let mut engine = make_engine();
     engine
         .orderbook
-        .add_order(limit_order(Side::Sell, TimeInForce::GTC, 100, 5));
+        .add_order(limit_order(Side::Sell, TimeInForce::GTC, 100, 5))
+        .unwrap();
 
     // IOC Buy 10, Sell 5만 존재 → 5 체결, 잔량 5는 오더북 미등록
     engine.place_order(limit_order(Side::Buy, TimeInForce::IOC, 100, 10));
@@ -141,7 +159,8 @@ fn 시장가_매도_quote_거부_테스트() {
     let mut engine = make_engine();
     engine
         .orderbook
-        .add_order(limit_order(Side::Buy, TimeInForce::GTC, 100, 10));
+        .add_order(limit_order(Side::Buy, TimeInForce::GTC, 100, 10))
+        .unwrap();
 
     // MARKET SELL + Quote → 거부
     engine.place_order(market_quote_order(Side::Sell, 500));
@@ -154,11 +173,11 @@ fn 주문_취소_성공_테스트() {
     let mut engine = make_engine();
     let order = limit_order(Side::Buy, TimeInForce::GTC, 100, 10);
     let order_id = order.order_id;
-    engine.orderbook.add_order(order);
+    engine.orderbook.add_order(order).unwrap();
 
     let result = engine.cancel_order(order_id);
 
-    let EngineResult::Cancel(r) = result else {
+    let EngineResultBody::Cancel(r) = result else {
         panic!("Cancel 결과여야 함");
     };
     let CancelOrderOutcome::Cancelled(snapshot) = r.outcome else {
@@ -176,7 +195,8 @@ fn 부분_체결_후_취소_테스트() {
     let mut engine = make_engine();
     engine
         .orderbook
-        .add_order(limit_order(Side::Sell, TimeInForce::GTC, 100, 5));
+        .add_order(limit_order(Side::Sell, TimeInForce::GTC, 100, 5))
+        .unwrap();
 
     let buy = limit_order(Side::Buy, TimeInForce::GTC, 100, 10);
     let buy_id = buy.order_id;
@@ -184,7 +204,7 @@ fn 부분_체결_후_취소_테스트() {
 
     let result = engine.cancel_order(buy_id);
 
-    let EngineResult::Cancel(r) = result else {
+    let EngineResultBody::Cancel(r) = result else {
         panic!("Cancel 결과여야 함");
     };
     let CancelOrderOutcome::Cancelled(snapshot) = r.outcome else {
@@ -202,7 +222,7 @@ fn 존재하지_않는_주문_취소_테스트() {
 
     let result = engine.cancel_order(Uuid::now_v7());
 
-    let EngineResult::Cancel(r) = result else {
+    let EngineResultBody::Cancel(r) = result else {
         panic!("Cancel 결과여야 함");
     };
     assert!(matches!(
@@ -215,13 +235,13 @@ fn 존재하지_않는_주문_취소_테스트() {
 fn 존재하지_않는_주문_정정_테스트() {
     let mut engine = make_engine();
 
-    let result = engine.amend_order(AmendOrderCommand {
-        order_id: Uuid::now_v7(),
-        price: Some(Decimal::new(100, 0)),
-        base_qty: Some(Decimal::new(5, 0)),
-    });
+    let result = engine.amend_order(amend_command(
+        Uuid::now_v7(),
+        Some(Decimal::new(100, 0)),
+        Some(Decimal::new(5, 0)),
+    ));
 
-    let EngineResult::Amend(r) = result else {
+    let EngineResultBody::Amend(r) = result else {
         panic!("Amend 결과여야 함");
     };
     assert!(matches!(
@@ -235,16 +255,12 @@ fn 정정_불가_주문_정정_테스트() {
     let mut engine = make_engine();
     let order = limit_order(Side::Buy, TimeInForce::GTC, 100, 10);
     let order_id = order.order_id;
-    engine.orderbook.add_order(order);
+    engine.orderbook.add_order(order).unwrap();
 
     // price, qty 모두 None → 변경 없음 → AmendNotAllowed
-    let result = engine.amend_order(AmendOrderCommand {
-        order_id,
-        price: None,
-        base_qty: None,
-    });
+    let result = engine.amend_order(amend_command(order_id, None, None));
 
-    let EngineResult::Amend(r) = result else {
+    let EngineResultBody::Amend(r) = result else {
         panic!("Amend 결과여야 함");
     };
     assert!(matches!(
@@ -258,15 +274,15 @@ fn 수량_감소_정정_테스트() {
     let mut engine = make_engine();
     let order = limit_order(Side::Buy, TimeInForce::GTC, 100, 10);
     let order_id = order.order_id;
-    engine.orderbook.add_order(order);
+    engine.orderbook.add_order(order).unwrap();
 
-    let result = engine.amend_order(AmendOrderCommand {
+    let result = engine.amend_order(amend_command(
         order_id,
-        price: Some(Decimal::new(100, 0)),
-        base_qty: Some(Decimal::new(5, 0)),
-    });
+        Some(Decimal::new(100, 0)),
+        Some(Decimal::new(5, 0)),
+    ));
 
-    let EngineResult::Amend(r) = result else {
+    let EngineResultBody::Amend(r) = result else {
         panic!("Amend 결과여야 함");
     };
     let AmendOrderOutcome::Amended(snapshot) = r.outcome else {
@@ -283,19 +299,20 @@ fn 정정_후_전량_체결_제거_테스트() {
     // SELL 5 → BUY 10 부분 체결: executed=5, remaining=5
     engine
         .orderbook
-        .add_order(limit_order(Side::Sell, TimeInForce::GTC, 100, 5));
+        .add_order(limit_order(Side::Sell, TimeInForce::GTC, 100, 5))
+        .unwrap();
     let buy = limit_order(Side::Buy, TimeInForce::GTC, 100, 10);
     let buy_id = buy.order_id;
     engine.place_order(buy);
 
     // new_qty=5 == executed_qty=5 → is_filled() → Amended + 오더북 제거
-    let result = engine.amend_order(AmendOrderCommand {
-        order_id: buy_id,
-        price: Some(Decimal::new(100, 0)),
-        base_qty: Some(Decimal::new(5, 0)),
-    });
+    let result = engine.amend_order(amend_command(
+        buy_id,
+        Some(Decimal::new(100, 0)),
+        Some(Decimal::new(5, 0)),
+    ));
 
-    let EngineResult::Amend(r) = result else {
+    let EngineResultBody::Amend(r) = result else {
         panic!("Amend 결과여야 함");
     };
     assert!(matches!(r.outcome, AmendOrderOutcome::Amended(_)));
@@ -307,15 +324,15 @@ fn 가격_변경_정정_테스트() {
     let mut engine = make_engine();
     let order = limit_order(Side::Buy, TimeInForce::GTC, 100, 10);
     let order_id = order.order_id;
-    engine.orderbook.add_order(order);
+    engine.orderbook.add_order(order).unwrap();
 
-    let result = engine.amend_order(AmendOrderCommand {
+    let result = engine.amend_order(amend_command(
         order_id,
-        price: Some(Decimal::new(101, 0)), // 가격 변경 → 우선순위 소실
-        base_qty: Some(Decimal::new(10, 0)),
-    });
+        Some(Decimal::new(101, 0)), // 가격 변경 → 우선순위 소실
+        Some(Decimal::new(10, 0)),
+    ));
 
-    let EngineResult::Amend(r) = result else {
+    let EngineResultBody::Amend(r) = result else {
         panic!("Amend 결과여야 함");
     };
     assert!(matches!(
@@ -329,15 +346,15 @@ fn 수량_증가_정정_테스트() {
     let mut engine = make_engine();
     let order = limit_order(Side::Buy, TimeInForce::GTC, 100, 10);
     let order_id = order.order_id;
-    engine.orderbook.add_order(order);
+    engine.orderbook.add_order(order).unwrap();
 
-    let result = engine.amend_order(AmendOrderCommand {
+    let result = engine.amend_order(amend_command(
         order_id,
-        price: Some(Decimal::new(100, 0)),
-        base_qty: Some(Decimal::new(15, 0)), // 수량 증가 → 우선순위 소실
-    });
+        Some(Decimal::new(100, 0)),
+        Some(Decimal::new(15, 0)), // 수량 증가 → 우선순위 소실
+    ));
 
-    let EngineResult::Amend(r) = result else {
+    let EngineResultBody::Amend(r) = result else {
         panic!("Amend 결과여야 함");
     };
     assert!(matches!(
