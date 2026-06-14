@@ -21,7 +21,7 @@ pub fn bench(c: &mut Criterion) {
                     // 새 book을 매 iteration마다 사용해 이전 iteration의 누적 상태가
                     // 삽입 비용에 섞이지 않게 한다.
                     for order in orders {
-                        orderbook.add_order(black_box(order.clone()));
+                        let _ = orderbook.add_order(black_box(order.clone()));
                     }
                     black_box(orderbook);
                 },

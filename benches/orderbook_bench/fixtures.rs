@@ -60,7 +60,7 @@ pub(super) fn orderbook_with(orders: &[Order]) -> OrderBook {
     let mut orderbook = OrderBook::default();
 
     for order in orders {
-        orderbook.add_order(order.clone());
+        let _ = orderbook.add_order(order.clone());
     }
 
     orderbook

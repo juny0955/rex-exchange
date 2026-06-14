@@ -21,6 +21,6 @@ impl MatchingEngine {
     }
 
     pub fn bench_seed_order(&mut self, order: Order) {
-        self.orderbook.add_order(order);
+        let _ = self.orderbook.add_order(order);
     }
 }

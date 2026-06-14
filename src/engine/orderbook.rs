@@ -19,6 +19,11 @@ pub struct OrderBook {
     index: HashMap<Uuid, Order>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrderBookError {
+    DuplicateOrderId(Uuid),
+}
+
 impl OrderBook {
     pub fn best_opposite_price(&self, side: &Side) -> Option<Decimal> {
         match side {
@@ -59,7 +64,11 @@ impl OrderBook {
 
     /// 주문 추가
     /// 주문을 index와 queue에 추가
-    pub fn add_order(&mut self, order: Order) {
+    pub fn add_order(&mut self, order: Order) -> Result<(), OrderBookError> {
+        if self.index.contains_key(&order.order_id) {
+            return Err(OrderBookError::DuplicateOrderId(order.order_id));
+        }
+
         match order.side {
             Side::Buy => {
                 self.bids
@@ -76,6 +85,7 @@ impl OrderBook {
         }
 
         self.index.insert(order.order_id, order);
+        Ok(())
     }
 
     /// 주문 삭제
@@ -236,14 +246,18 @@ mod tests {
     #[test]
     fn 최상위_반대편_호가_조회_테스트() {
         let mut ob = OrderBook::default();
-        ob.add_order(make_ask(Decimal::new(200, 0), Decimal::new(5, 0)));
-        ob.add_order(make_ask(Decimal::new(100, 0), Decimal::new(5, 0)));
+        ob.add_order(make_ask(Decimal::new(200, 0), Decimal::new(5, 0)))
+            .unwrap();
+        ob.add_order(make_ask(Decimal::new(100, 0), Decimal::new(5, 0)))
+            .unwrap();
 
         let ask_price = ob.best_opposite_price(&Side::Buy).unwrap();
         assert_eq!(ask_price, Decimal::new(100, 0)); // 최저 매도호가
 
-        ob.add_order(make_bid(Decimal::new(80, 0), Decimal::new(5, 0)));
-        ob.add_order(make_bid(Decimal::new(90, 0), Decimal::new(5, 0)));
+        ob.add_order(make_bid(Decimal::new(80, 0), Decimal::new(5, 0)))
+            .unwrap();
+        ob.add_order(make_bid(Decimal::new(90, 0), Decimal::new(5, 0)))
+            .unwrap();
 
         let bid_price = ob.best_opposite_price(&Side::Sell).unwrap();
         assert_eq!(bid_price, Decimal::new(90, 0)); // 최고 매수호가
@@ -253,8 +267,10 @@ mod tests {
     fn base_전량_체결_가능_확인_테스트() {
         let mut ob = OrderBook::default();
         // 100에 qty 5, 120에 qty 10
-        ob.add_order(make_ask(Decimal::new(100, 0), Decimal::new(5, 0)));
-        ob.add_order(make_ask(Decimal::new(120, 0), Decimal::new(10, 0)));
+        ob.add_order(make_ask(Decimal::new(100, 0), Decimal::new(5, 0)))
+            .unwrap();
+        ob.add_order(make_ask(Decimal::new(120, 0), Decimal::new(10, 0)))
+            .unwrap();
 
         // 지정가 110 → ask@100만 유효(qty 5)
         assert!(!ob.can_fully_fill_base(Side::Buy, Decimal::new(8, 0), Decimal::new(110, 0)));
@@ -268,8 +284,10 @@ mod tests {
     fn quote_전량_체결_가능_확인_테스트() {
         let mut ob = OrderBook::default();
         // ask@100 qty 3 (300), ask@200 qty 2 (400) → 총 700
-        ob.add_order(make_ask(Decimal::new(100, 0), Decimal::new(3, 0)));
-        ob.add_order(make_ask(Decimal::new(200, 0), Decimal::new(2, 0)));
+        ob.add_order(make_ask(Decimal::new(100, 0), Decimal::new(3, 0)))
+            .unwrap();
+        ob.add_order(make_ask(Decimal::new(200, 0), Decimal::new(2, 0)))
+            .unwrap();
 
         assert!(!ob.can_fully_fill_quote(Side::Buy, Decimal::new(800, 0)));
         assert!(ob.can_fully_fill_quote(Side::Buy, Decimal::new(500, 0)));
@@ -280,12 +298,32 @@ mod tests {
         let mut ob = OrderBook::default();
         let order = make_ask(Decimal::new(100, 0), Decimal::new(5, 0));
         let order_id = order.order_id;
-        ob.add_order(order);
+        ob.add_order(order).unwrap();
 
         assert!(ob.best_opposite_price(&Side::Buy).is_some());
 
         ob.remove_order(order_id);
 
+        assert!(ob.best_opposite_price(&Side::Buy).is_none());
+    }
+
+    #[test]
+    fn duplicate_order_id는_기존_queue와_index를_보존한다() {
+        let mut ob = OrderBook::default();
+        let order = make_ask(Decimal::new(100, 0), Decimal::new(1, 0));
+        let duplicate = Order {
+            price: Some(Decimal::new(200, 0)),
+            ..order.clone()
+        };
+
+        ob.add_order(order.clone()).unwrap();
+        let result = ob.add_order(duplicate);
+
+        assert!(matches!(
+            result,
+            Err(OrderBookError::DuplicateOrderId(id)) if id == order.order_id
+        ));
+        assert!(ob.remove_order(order.order_id).is_some());
         assert!(ob.best_opposite_price(&Side::Buy).is_none());
     }
 }
